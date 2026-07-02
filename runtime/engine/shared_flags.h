@@ -70,6 +70,8 @@ ABSL_DECLARE_FLAG(double, repetition_penalty);
 ABSL_DECLARE_FLAG(double, presence_penalty);
 ABSL_DECLARE_FLAG(double, frequency_penalty);
 ABSL_DECLARE_FLAG(int, repetition_window_size);
+ABSL_DECLARE_FLAG(int, no_repeat_ngram_size);
+ABSL_DECLARE_FLAG(int, no_repeat_ngram_window_size);
 ABSL_DECLARE_FLAG(std::string, suppress_tokens);
 ABSL_DECLARE_FLAG(std::string, constraint_regex);
 ABSL_DECLARE_FLAG(bool, use_submodel);

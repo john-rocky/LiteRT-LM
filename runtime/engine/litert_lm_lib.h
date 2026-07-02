@@ -34,6 +34,7 @@
 #include "absl/strings/string_view.h"  // from @com_google_absl
 #include "absl/synchronization/mutex.h"  // from @com_google_absl
 #include "nlohmann/json.hpp"  // from @nlohmann_json
+#include "runtime/components/logits_processor/no_repeat_ngram_config.h"
 #include "runtime/components/logits_processor/repetition_penalty_config.h"
 #include "runtime/components/logits_processor/suppress_tokens_config.h"
 #include "runtime/engine/engine.h"
@@ -128,6 +129,7 @@ struct LiteRtLmSettings {
   bool cache_compiled_shaders_only = false;
   RepetitionPenaltyConfig repetition_penalty_config =
       RepetitionPenaltyConfig::Default();
+  NoRepeatNgramConfig no_repeat_ngram_config = NoRepeatNgramConfig::Default();
   SuppressTokensConfig suppress_tokens_config = SuppressTokensConfig::Default();
   std::string constraint_regex = "";
   bool use_submodel = false;

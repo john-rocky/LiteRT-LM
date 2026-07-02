@@ -40,6 +40,7 @@
 #include "absl/strings/str_cat.h"  // from @com_google_absl
 #include "absl/strings/str_split.h"  // from @com_google_absl
 #include "absl/strings/string_view.h"  // from @com_google_absl
+#include "runtime/components/logits_processor/no_repeat_ngram_config.h"
 #include "runtime/components/logits_processor/repetition_penalty_config.h"
 #include "runtime/components/logits_processor/suppress_tokens_config.h"
 #include "runtime/engine/litert_lm_lib.h"
@@ -135,6 +136,12 @@ litert::lm::RepetitionPenaltyConfig GetRepetitionPenaltyConfig() {
       absl::GetFlag(FLAGS_repetition_window_size));
 }
 
+litert::lm::NoRepeatNgramConfig GetNoRepeatNgramConfig() {
+  return litert::lm::NoRepeatNgramConfig(
+      /*no_repeat_ngram_size=*/absl::GetFlag(FLAGS_no_repeat_ngram_size),
+      /*window_size=*/absl::GetFlag(FLAGS_no_repeat_ngram_window_size));
+}
+
 ::litert::lm::SuppressTokensConfig GetSuppressTokensConfig(
     absl::string_view input) {
   absl::flat_hash_set<int> result;
@@ -225,6 +232,8 @@ absl::Status MainHelper(int argc, char** argv) {
            "[--presence_penalty=<presence_penalty>]"
            "[--frequency_penalty=<frequency_penalty>]"
            "[--repetition_window_size=<repetition_window_size>]"
+           "[--no_repeat_ngram_size=<no_repeat_ngram_size>]"
+           "[--no_repeat_ngram_window_size=<no_repeat_ngram_window_size>]"
            "[--suppress_tokens=<token1,token2,...>]"
            "[--constraint_regex=<constraint_regex>]"
            "[--enable_speculative_decoding=<true|false>]";
@@ -307,6 +316,7 @@ absl::Status MainHelper(int argc, char** argv) {
       : absl::GetFlag(FLAGS_conv_type) == "int8" ? litert::lm::ConvType::kInt8
                                                  : litert::lm::ConvType::kAuto;
   settings.repetition_penalty_config = GetRepetitionPenaltyConfig();
+  settings.no_repeat_ngram_config = GetNoRepeatNgramConfig();
   settings.suppress_tokens_config =
       GetSuppressTokensConfig(absl::GetFlag(FLAGS_suppress_tokens));
   settings.constraint_regex = absl::GetFlag(FLAGS_constraint_regex);

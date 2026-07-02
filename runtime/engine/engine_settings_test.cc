@@ -24,6 +24,7 @@
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include "absl/container/flat_hash_set.h"  // from @com_google_absl
 #include "absl/status/status.h"  // from @com_google_absl
 #include "absl/status/statusor.h"  // from @com_google_absl
 #include "absl/strings/str_cat.h"  // from @com_google_absl
@@ -31,6 +32,7 @@
 #include "absl/types/optional.h"  // from @com_google_absl
 #include "litert/cc/internal/scoped_file.h"  // from @litert  // IWYU pragma: keep
 #include "support/tokenizer/tokenizer.h"  // from @litert
+#include "runtime/components/logits_processor/suppress_tokens_config.h"
 #include "runtime/executor/executor_settings_base.h"
 #include "runtime/proto/engine.pb.h"
 #include "runtime/proto/llm_metadata.pb.h"
@@ -51,6 +53,7 @@ using ::testing::ContainsRegex;
 using ::testing::ElementsAre;
 using ::testing::Eq;
 using ::testing::Return;
+using ::testing::UnorderedElementsAre;
 using ::testing::status::StatusIs;
 
 class MockTokenizer : public Tokenizer {
@@ -945,6 +948,17 @@ TEST(SessionConfigTest, SetAndGetLlmModelType) {
             proto::LlmModelType::kGemma3N);
 }
 
+TEST(SessionConfigTest, SetAndGetSuppressTokensConfig) {
+  SessionConfig session_config = SessionConfig::CreateDefault();
+  EXPECT_FALSE(session_config.GetSuppressTokensConfig().enabled());
+
+  session_config.SetSuppressTokensConfig(
+      SuppressTokensConfig(absl::flat_hash_set<int>{1, 2}));
+  EXPECT_TRUE(session_config.GetSuppressTokensConfig().enabled());
+  EXPECT_THAT(session_config.GetSuppressTokensConfig().suppress_tokens(),
+              UnorderedElementsAre(1, 2));
+}
+
 TEST(SessionConfigTest, SetAndGetScopedLoraFile) {
   SessionConfig session_config = SessionConfig::CreateDefault();
   EXPECT_EQ(session_config.GetScopedLoraFile(), nullptr);
@@ -1086,6 +1100,32 @@ TEST(SessionConfigTest,
   // When the user explicitly sets the sampler backend during engine creation,
   // the sampler backend from metadata should not overwrite it.
   EXPECT_EQ(session_config.GetSamplerBackend(), Backend::CPU);
+}
+
+TEST(SessionConfigTest, MaybeUpdateAndValidateSuppressTokensFromMetadata) {
+  ASSERT_OK_AND_ASSIGN(auto model_assets,
+                       ModelAssets::Create("test_model_path_1"));
+  ASSERT_OK_AND_ASSIGN(auto settings,
+                       EngineSettings::CreateDefault(model_assets));
+
+  auto session_config = SessionConfig::CreateDefault();
+
+  MockTokenizer tokenizer;
+  EXPECT_CALL(tokenizer, TokenIdsToText).WillRepeatedly(Return("fake_text"));
+  EXPECT_CALL(tokenizer, TokenToId).WillRepeatedly(Return(1));
+  EXPECT_CALL(tokenizer, TextToTokenIds)
+      .WillRepeatedly(Return(std::vector<int>{1}));
+  proto::LlmMetadata llm_metadata = CreateLlmMetadata();
+  EXPECT_FALSE(llm_metadata.has_suppress_tokens());
+  llm_metadata.mutable_suppress_tokens()->add_ids(3);
+  llm_metadata.mutable_suppress_tokens()->add_ids(4);
+
+  EXPECT_OK(settings.MaybeUpdateAndValidate(&tokenizer, &llm_metadata));
+  EXPECT_OK(session_config.MaybeUpdateAndValidate(settings));
+
+  // The suppress tokens from metadata are set to the session config.
+  EXPECT_THAT(session_config.GetSuppressTokensConfig().suppress_tokens(),
+              UnorderedElementsAre(3, 4));
 }
 
 TEST(SessionConfigTest,

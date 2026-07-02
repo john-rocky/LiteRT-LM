@@ -164,6 +164,13 @@ ABSL_FLAG(
 ABSL_FLAG(int, repetition_window_size, 0,
           "The maximum number of recent tokens to consider for penalization. "
           "Tokens older than this are forgotten. 0 means track all history.");
+ABSL_FLAG(int, no_repeat_ngram_size, 0,
+          "If greater than 0, all ngrams of this size can only occur once in "
+          "the generated sequence. The logits of the banned tokens will be set "
+          "to -inf.");
+ABSL_FLAG(int, no_repeat_ngram_window_size, 0,
+          "The maximum number of recent tokens to consider for banning. "
+          "Tokens older than this are forgotten. 0 means track all history.");
 ABSL_FLAG(std::string, suppress_tokens, "",
           "A comma-separated list of tokens to suppress.");
 ABSL_FLAG(std::string, constraint_regex, "",
