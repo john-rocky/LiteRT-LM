@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "absl/base/nullability.h"  // from @com_google_absl
+#include "absl/container/flat_hash_set.h"  // from @com_google_absl
 #include "absl/log/absl_log.h"  // from @com_google_absl
 #include "absl/status/status.h"  // from @com_google_absl
 #include "absl/status/statusor.h"  // from @com_google_absl
@@ -31,6 +32,7 @@
 #include "absl/strings/str_split.h"  // from @com_google_absl
 #include "absl/strings/string_view.h"  // from @com_google_absl
 #include "support/tokenizer/tokenizer.h"  // from @litert
+#include "runtime/components/logits_processor/suppress_tokens_config.h"
 #include "runtime/components/model_resources.h"
 #include "runtime/executor/audio_executor_settings.h"
 #include "runtime/executor/executor_settings_base.h"
@@ -648,6 +650,13 @@ absl::Status SessionConfig::MaybeUpdateAndValidate(
         proto::LlmModelType::MODEL_TYPE_NOT_SET) {
       llm_model_type_ = llm_metadata.llm_model_type();
     }
+
+    if (llm_metadata.has_suppress_tokens() &&
+        !llm_metadata.suppress_tokens().ids().empty()) {
+      suppress_tokens_config_ = SuppressTokensConfig(absl::flat_hash_set<int>(
+          llm_metadata.suppress_tokens().ids().cbegin(),
+          llm_metadata.suppress_tokens().ids().cend()));
+    }
   }
 
   // Validating the required fields are set correctly.
@@ -725,6 +734,15 @@ const proto::LlmModelType& SessionConfig::GetLlmModelType() const {
 
 proto::LlmModelType& SessionConfig::GetMutableLlmModelType() {
   return llm_model_type_;
+}
+
+const SuppressTokensConfig& SessionConfig::GetSuppressTokensConfig() const {
+  return suppress_tokens_config_;
+}
+
+void SessionConfig::SetSuppressTokensConfig(
+    const SuppressTokensConfig& suppress_tokens_config) {
+  suppress_tokens_config_ = suppress_tokens_config;
 }
 
 std::shared_ptr<ScopedFile> SessionConfig::GetScopedLoraFile() const {

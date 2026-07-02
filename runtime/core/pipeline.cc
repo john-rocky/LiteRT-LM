@@ -27,6 +27,7 @@
 #include "litert/cc/litert_macros.h"  // from @litert
 #include "litert/cc/litert_tensor_buffer.h"  // from @litert
 #include "runtime/components/logits_processor/constrained_decoding/constraint.h"
+#include "runtime/components/logits_processor/no_repeat_ngram_config.h"
 #include "runtime/components/logits_processor/repetition_penalty_config.h"
 #include "runtime/components/logits_processor/suppress_tokens_config.h"
 #include "runtime/components/sampler.h"
@@ -61,6 +62,7 @@ absl::StatusOr<Responses> Decode(
     LlmExecutor& executor, Tokenizer& tokenizer,
     const StopTokenDetector& stop_token_detector, int num_output_candidates,
     RepetitionPenaltyConfig repetition_penalty_config,
+    NoRepeatNgramConfig no_repeat_ngram_config,
     SuppressTokensConfig suppress_tokens_config, Constraint* constraint,
     std::optional<BenchmarkInfo>& benchmark_info, std::atomic<bool>* cancelled,
     int max_output_tokens) {
@@ -69,6 +71,7 @@ absl::StatusOr<Responses> Decode(
                        num_output_candidates, benchmark_info,
                        /*sampler=*/std::nullopt,
                        std::move(repetition_penalty_config),
+                       std::move(no_repeat_ngram_config),
                        std::move(suppress_tokens_config), constraint,
                        /*decoded_ids=*/std::nullopt, /*callback=*/callback,
                        cancelled, max_output_tokens);
@@ -78,6 +81,7 @@ absl::Status DecodeStreaming(
     LlmExecutor& executor, Tokenizer& tokenizer,
     const StopTokenDetector& stop_token_detector, int num_output_candidates,
     RepetitionPenaltyConfig repetition_penalty_config,
+    NoRepeatNgramConfig no_repeat_ngram_config,
     SuppressTokensConfig suppress_tokens_config, Constraint* constraint,
     std::optional<BenchmarkInfo>& benchmark_info,
     absl::AnyInvocable<void(absl::StatusOr<Responses>)> callback,
@@ -90,7 +94,8 @@ absl::Status DecodeStreaming(
       executor, tokenizer, stop_token_detector, num_output_candidates,
       benchmark_info,
       /*sampler=*/std::nullopt, std::move(repetition_penalty_config),
-      std::move(suppress_tokens_config), constraint,
+      std::move(no_repeat_ngram_config), std::move(suppress_tokens_config),
+      constraint,
       /*decoded_ids=*/std::nullopt, callback, cancelled, max_output_tokens);
 
   // Trigger the callback with the final result.
@@ -105,6 +110,7 @@ absl::StatusOr<Responses> DecodeCustomSampling(
     const StopTokenDetector& stop_token_detector, int num_output_candidates,
     Sampler& sampler, litert::TensorBuffer decoded_ids,
     RepetitionPenaltyConfig repetition_penalty_config,
+    NoRepeatNgramConfig no_repeat_ngram_config,
     SuppressTokensConfig suppress_tokens_config, Constraint* constraint,
     std::optional<BenchmarkInfo>& benchmark_info, std::atomic<bool>* cancelled,
     int max_output_tokens) {
@@ -112,7 +118,8 @@ absl::StatusOr<Responses> DecodeCustomSampling(
   return Tasks::Decode(
       executor, tokenizer, stop_token_detector, num_output_candidates,
       benchmark_info, &sampler, std::move(repetition_penalty_config),
-      std::move(suppress_tokens_config), constraint, std::move(decoded_ids),
+      std::move(no_repeat_ngram_config), std::move(suppress_tokens_config),
+      constraint, std::move(decoded_ids),
       /*callback=*/callback, cancelled, max_output_tokens);
 }
 
@@ -121,6 +128,7 @@ absl::Status DecodeCustomSamplingStreaming(
     const StopTokenDetector& stop_token_detector, int num_output_candidates,
     Sampler& sampler, litert::TensorBuffer decoded_ids,
     RepetitionPenaltyConfig repetition_penalty_config,
+    NoRepeatNgramConfig no_repeat_ngram_config,
     SuppressTokensConfig suppress_tokens_config, Constraint* constraint,
     std::optional<BenchmarkInfo>& benchmark_info,
     absl::AnyInvocable<void(absl::StatusOr<Responses>)> callback,
@@ -132,8 +140,9 @@ absl::Status DecodeCustomSamplingStreaming(
   absl::StatusOr<Responses> task_respones = Tasks::Decode(
       executor, tokenizer, stop_token_detector, num_output_candidates,
       benchmark_info, &sampler, std::move(repetition_penalty_config),
-      std::move(suppress_tokens_config), constraint, std::move(decoded_ids),
-      callback, cancelled, max_output_tokens);
+      std::move(no_repeat_ngram_config), std::move(suppress_tokens_config),
+      constraint, std::move(decoded_ids), callback, cancelled,
+      max_output_tokens);
 
   // Trigger the callback with the final result.
   // This can be either a error message, or a task state (e.g. kDone or

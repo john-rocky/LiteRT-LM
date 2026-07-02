@@ -26,6 +26,7 @@
 #include "litert/cc/litert_tensor_buffer.h"  // from @litert
 #include "support/tokenizer/tokenizer.h"  // from @litert
 #include "runtime/components/logits_processor/constrained_decoding/constraint.h"
+#include "runtime/components/logits_processor/no_repeat_ngram_config.h"
 #include "runtime/components/logits_processor/repetition_penalty_config.h"
 #include "runtime/components/logits_processor/suppress_tokens_config.h"
 #include "runtime/components/sampler.h"
@@ -48,6 +49,7 @@ absl::StatusOr<Responses> Decode(
     std::optional<BenchmarkInfo>& benchmark_info,
     std::optional<Sampler*> sampler,
     RepetitionPenaltyConfig repetition_penalty_config,
+    NoRepeatNgramConfig no_repeat_ngram_config,
     SuppressTokensConfig suppress_tokens_config, Constraint* constraint,
     std::optional<litert::TensorBuffer> decoded_ids,
     absl::AnyInvocable<void(absl::StatusOr<Responses>)>& callback,

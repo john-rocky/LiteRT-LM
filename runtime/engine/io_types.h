@@ -30,6 +30,7 @@
 #include "absl/time/time.h"  // from @com_google_absl
 #include "support/util/io_types.h"  // from @litert
 #include "runtime/components/logits_processor/constrained_decoding/constraint.h"
+#include "runtime/components/logits_processor/no_repeat_ngram_config.h"
 #include "runtime/components/logits_processor/repetition_penalty_config.h"
 #include "runtime/components/logits_processor/suppress_tokens_config.h"
 #include "runtime/proto/engine.pb.h"
@@ -316,8 +317,19 @@ class DecodeConfig {
   }
 
   // Returns the repetition penalty config.
-  RepetitionPenaltyConfig GetRepetitionPenaltyConfig() const {
+  const RepetitionPenaltyConfig& GetRepetitionPenaltyConfig() const {
     return repetition_penalty_config_;
+  }
+
+  // Sets the no repeat ngram config to ban repetitive ngrams during decoding.
+  void SetNoRepeatNgramConfig(
+      const NoRepeatNgramConfig& no_repeat_ngram_config) {
+    no_repeat_ngram_config_ = no_repeat_ngram_config;
+  }
+
+  // Returns the no repeat ngram config.
+  NoRepeatNgramConfig GetNoRepeatNgramConfig() const {
+    return no_repeat_ngram_config_;
   }
 
   // Sets the suppress tokens config to suppress specific tokens during
@@ -328,7 +340,7 @@ class DecodeConfig {
   }
 
   // Returns the suppress tokens config.
-  SuppressTokensConfig GetSuppressTokensConfig() const {
+  const std::optional<SuppressTokensConfig>& GetSuppressTokensConfig() const {
     return suppress_tokens_config_;
   }
 
@@ -385,8 +397,11 @@ class DecodeConfig {
 
   RepetitionPenaltyConfig repetition_penalty_config_ =
       RepetitionPenaltyConfig::Default();
-  SuppressTokensConfig suppress_tokens_config_ =
-      SuppressTokensConfig::Default();
+  NoRepeatNgramConfig no_repeat_ngram_config_ = NoRepeatNgramConfig::Default();
+  // If set, the suppress tokens config will be used to suppress specific tokens
+  // during decoding. If not set, the suppress tokens config will be loaded from
+  // the model assets.
+  std::optional<SuppressTokensConfig> suppress_tokens_config_ = std::nullopt;
   Constraint* absl_nullable constraint_ = nullptr;
   std::optional<int> max_output_tokens_ = std::nullopt;
   std::optional<int> thinking_token_budget_ = std::nullopt;

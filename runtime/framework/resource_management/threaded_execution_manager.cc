@@ -40,6 +40,7 @@
 #include "litert/cc/litert_macros.h"  // from @litert
 #include "litert/cc/litert_tensor_buffer.h"  // from @litert
 #include "runtime/components/logits_processor/constrained_decoding/constraint.h"
+#include "runtime/components/logits_processor/no_repeat_ngram_config.h"
 #include "runtime/components/logits_processor/repetition_penalty_config.h"
 #include "runtime/components/logits_processor/suppress_tokens_config.h"
 #include "runtime/components/model_resources.h"
@@ -856,6 +857,7 @@ absl::Status ThreadedExecutionManager::AddPrefillTask(
 absl::Status ThreadedExecutionManager::AddDecodeTask(
     SessionId session_id, TaskId task_id, absl::flat_hash_set<TaskId> dep_tasks,
     RepetitionPenaltyConfig repetition_penalty_config,
+    NoRepeatNgramConfig no_repeat_ngram_config,
     SuppressTokensConfig suppress_tokens_config,
     Constraint* absl_nullable constraint,
     std::shared_ptr<std::atomic<bool>> absl_nonnull cancelled,
@@ -869,6 +871,7 @@ absl::Status ThreadedExecutionManager::AddDecodeTask(
 
   auto task = [this, task_id,
                repetition_penalty_config = std::move(repetition_penalty_config),
+               no_repeat_ngram_config = std::move(no_repeat_ngram_config),
                suppress_tokens_config = std::move(suppress_tokens_config),
                constraint, cancelled, max_output_tokens, thinking_token_budget,
                thinking_start_token_ids = std::move(thinking_start_token_ids),
@@ -930,8 +933,9 @@ absl::Status ThreadedExecutionManager::AddDecodeTask(
     auto responses = Tasks::Decode(
         *llm_executor.value(), *tokenizer_, *session_info->stop_token_detector,
         num_output_candidates, session_info->benchmark_info, optional_sampler,
-        std::move(repetition_penalty_config), std::move(suppress_tokens_config),
-        constraint, std::move(decoded_ids_buffer), callback, cancelled.get(),
+        std::move(repetition_penalty_config), std::move(no_repeat_ngram_config),
+        std::move(suppress_tokens_config), constraint,
+        std::move(decoded_ids_buffer), callback, cancelled.get(),
         max_output_tokens, thinking_token_budget, thinking_end_token_ids,
         thinking_start_token_ids);
     if (!responses.ok() && absl::IsCancelled(responses.status())) {
