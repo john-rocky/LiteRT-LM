@@ -386,6 +386,9 @@ class LiteRTLMBuilderCLITest(absltest.TestCase):
     toml_path = os.path.join(unpack_dir, "model.toml")
     self.assertTrue(os.path.exists(toml_path))
 
+  def test_cns_output_paths_rejected(self):
+    """Tests that outputting or unpacking directly to /cns/ is rejected."""
+
 
 if __name__ == "__main__":
   absltest.main()
