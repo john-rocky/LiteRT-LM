@@ -92,6 +92,34 @@ bool IsUserMessage(const nlohmann::ordered_json& json_msg) {
          json_msg[kRoleKey].get<absl::string_view>() == kUser;
 }
 
+absl::string_view TaskStateToString(TaskState task_state) {
+  switch (task_state) {
+    case TaskState::kUnknown:
+      return "Unknown";
+    case TaskState::kCreated:
+      return "Created";
+    case TaskState::kQueued:
+      return "Queued";
+    case TaskState::kProcessing:
+      return "Processing";
+    case TaskState::kDone:
+      return "Done";
+    case TaskState::kMaxNumTokensReached:
+      return "MaxNumTokensReached";
+    case TaskState::kFailed:
+      return "Failed";
+    case TaskState::kDependentTaskFailed:
+      return "DependentTaskFailed";
+    case TaskState::kCancelled:
+      return "Cancelled";
+    case TaskState::kDependentTaskCancelled:
+      return "DependentTaskCancelled";
+    case TaskState::kLastCallbackQueued:
+      return "LastCallbackQueued";
+  }
+  return "Unknown";
+}
+
 }  // namespace
 
 absl::StatusOr<ConversationConfig> ConversationConfig::CreateDefault(
@@ -566,11 +594,21 @@ absl::Status Conversation::SendMessageAsync(
         session_->RunPrefillAsync(
             session_inputs, [callback = std::move(user_callback)](
                                 absl::StatusOr<Responses> responses) mutable {
-              auto status = IgnoreEmptyInputError(responses.status());
-              if (!status.ok()) {
-                callback(responses.status());
-              } else {
+              if (!responses.ok()) {
+                auto status = IgnoreEmptyInputError(responses.status());
+                if (!status.ok()) {
+                  callback(status);
+                } else {
+                  callback(Message());
+                }
+                return;
+              }
+              if (responses->GetTaskState() == TaskState::kDone) {
                 callback(Message());
+              } else if (IsTaskEndState(responses->GetTaskState())) {
+                callback(absl::InternalError(absl::StrCat(
+                    "Prefill failed with task state: ",
+                    TaskStateToString(responses->GetTaskState()))));
               }
             }));
     AddTaskController(optional_args.task_group_id, std::move(task_controller));
