@@ -149,9 +149,8 @@ jobs:
       - name: Install pytest
         run: python3 -m pip install --break-system-packages pytest==8.3.4
 
-      # Disable it as its "unrecognized arguments" error blocks submissions.
-      # - name: Run pytest
-      #   run: pytest tools/test/ --model-path=${{ env.MODEL_PATH }} --build-system=bazel
+      - name: Run pytest
+        run: pytest tools/pytest/ --model-path=${{ env.MODEL_PATH }} --build-system=bazel
 
       # TODO(totero): Re-enable this step once the bug is fixed.
       # - name: Run bazel build for iOS Simulator.
