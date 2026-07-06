@@ -23,6 +23,7 @@
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include "absl/status/status_macros.h"  // from @com_google_absl
 #include "absl/status/statusor.h"  // from @com_google_absl
 #include "absl/strings/string_view.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
@@ -79,15 +80,16 @@ absl::StatusOr<TensorBuffer> CreateTensorBuffer(
 absl::StatusOr<std::unique_ptr<AudioLiteRtCompiledModelExecutor>>
 CreateAudioExecutor(Environment& env, const std::string& model_path,
                     int max_sequence_length, Backend backend) {
-  ASSIGN_OR_RETURN(auto model_file, litert::lm::ScopedFile::Open(model_path));
+  ABSL_ASSIGN_OR_RETURN(auto model_file,
+                        litert::lm::ScopedFile::Open(model_path));
   auto model_file_ptr =
       std::make_shared<litert::lm::ScopedFile>(std::move(model_file));
-  ASSIGN_OR_RETURN(auto model_assets,
-                   litert::lm::ModelAssets::Create(model_file_ptr));
+  ABSL_ASSIGN_OR_RETURN(auto model_assets,
+                        litert::lm::ModelAssets::Create(model_file_ptr));
   // Create the audio executor settings.
-  ASSIGN_OR_RETURN(auto audio_executor_settings,
-                   litert::lm::AudioExecutorSettings::CreateDefault(
-                       model_assets, max_sequence_length, backend));
+  ABSL_ASSIGN_OR_RETURN(auto audio_executor_settings,
+                        litert::lm::AudioExecutorSettings::CreateDefault(
+                            model_assets, max_sequence_length, backend));
   // Create the audio executor.
   return litert::lm::AudioLiteRtCompiledModelExecutor::Create(
       audio_executor_settings, env);

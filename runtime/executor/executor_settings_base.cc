@@ -23,6 +23,7 @@
 #include "absl/container/flat_hash_set.h"  // from @com_google_absl
 #include "absl/log/absl_log.h"  // from @com_google_absl
 #include "absl/status/status.h"  // from @com_google_absl
+#include "absl/status/status_macros.h"  // from @com_google_absl
 #include "absl/status/statusor.h"  // from @com_google_absl
 #include "absl/strings/match.h"  // from @com_google_absl
 #include "absl/strings/str_cat.h"  // from @com_google_absl
@@ -239,7 +240,7 @@ absl::StatusOr<std::shared_ptr<ScopedFile>> ModelAssets::GetOrCreateScopedFile()
         "Cannot create ScopedFile from MemoryMappedFile.");
   }
 
-  ASSIGN_OR_RETURN(auto scoped_file, ScopedFile::Open(path_));
+  ABSL_ASSIGN_OR_RETURN(auto scoped_file, ScopedFile::Open(path_));
   return std::make_shared<ScopedFile>(std::move(scoped_file));
 }
 
@@ -337,7 +338,7 @@ ExecutorSettingsBase::GetWeightCacheFile(absl::string_view suffix,
   if (GetCacheDir().empty()) {
     cache_path = absl::StrCat(model_path, suffix, metadata_id);
   } else {
-    ASSIGN_OR_RETURN(
+    ABSL_ASSIGN_OR_RETURN(
         cache_path, JoinPath(GetCacheDir(), absl::StrCat(Basename(model_path),
                                                          suffix, metadata_id)));
   }
@@ -397,7 +398,7 @@ ExecutorSettingsBase::GetProgramCacheFile(absl::string_view suffix,
   if (GetCacheDir().empty()) {
     cache_path = absl::StrCat(model_path, metadata_id, suffix);
   } else {
-    ASSIGN_OR_RETURN(
+    ABSL_ASSIGN_OR_RETURN(
         cache_path, JoinPath(GetCacheDir(), absl::StrCat(Basename(model_path),
                                                          metadata_id, suffix)));
   }

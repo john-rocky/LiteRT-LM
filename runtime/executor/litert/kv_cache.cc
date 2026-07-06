@@ -26,6 +26,7 @@
 #include "absl/container/flat_hash_map.h"  // from @com_google_absl
 #include "absl/memory/memory.h"  // from @com_google_absl
 #include "absl/status/status.h"  // from @com_google_absl
+#include "absl/status/status_macros.h"  // from @com_google_absl
 #include "absl/status/statusor.h"  // from @com_google_absl
 #include "absl/strings/match.h"  // from @com_google_absl
 #include "absl/strings/string_view.h"  // from @com_google_absl
@@ -146,9 +147,9 @@ absl::StatusOr<TensorBuffer> ResizeTensorBuffer(Environment& env,
   std::optional<size_t> element_size = GetByteWidth(tensor_type.ElementType());
   RET_CHECK(element_size.has_value());
 
-  RETURN_IF_ERROR(ExpandBuffer(tensor_buffer_ptr, dimensions,
-                               new_tensor_buffer_ptr, new_dimensions,
-                               element_size.value()));
+  ABSL_RETURN_IF_ERROR(ExpandBuffer(tensor_buffer_ptr, dimensions,
+                                    new_tensor_buffer_ptr, new_dimensions,
+                                    element_size.value()));
 
   return new_tensor_buffer;
 }
@@ -206,7 +207,7 @@ absl::StatusOr<std::unique_ptr<LitertKVCache>> LitertKVCache::Create(
   std::string kv_cache_k_root_name;
   std::string kv_cache_v_root_name;
   LITERT_ASSIGN_OR_RETURN(auto signature, model.FindSignature(signature_name));
-  RETURN_IF_ERROR(
+  ABSL_RETURN_IF_ERROR(
       GetKVCacheRootNames(signature.InputNames(), signature.OutputNames(),
                           kv_cache_k_root_name, kv_cache_v_root_name));
 
@@ -231,10 +232,10 @@ absl::StatusOr<std::unique_ptr<LitertKVCache>> LitertKVCache::Create(
     }
   }
 
-  ASSIGN_OR_RETURN(
+  ABSL_ASSIGN_OR_RETURN(
       std::optional<int> k_dynamic_dim,
       GetDynamicDimIndex(model, signature_name, key_cache_input_names[0]));
-  ASSIGN_OR_RETURN(
+  ABSL_ASSIGN_OR_RETURN(
       std::optional<int> v_dynamic_dim,
       GetDynamicDimIndex(model, signature_name, value_cache_input_names[0]));
   RET_CHECK(k_dynamic_dim.has_value() == v_dynamic_dim.has_value());
@@ -246,9 +247,9 @@ absl::StatusOr<std::unique_ptr<LitertKVCache>> LitertKVCache::Create(
     absl::flat_hash_map<std::string, TensorBuffer> buffers;
     for (const auto& input_name : input_names) {
       if (dynamic_dim.has_value()) {
-        RETURN_IF_ERROR(ResolveDynamicShape(signature, compiled_model,
-                                            signature_name, input_name,
-                                            /*new_value=*/1));
+        ABSL_RETURN_IF_ERROR(ResolveDynamicShape(signature, compiled_model,
+                                                 signature_name, input_name,
+                                                 /*new_value=*/1));
       }
       LITERT_ASSIGN_OR_RETURN(auto buffer, compiled_model.CreateInputBuffer(
                                                signature_name, input_name));
@@ -260,10 +261,11 @@ absl::StatusOr<std::unique_ptr<LitertKVCache>> LitertKVCache::Create(
     return buffers;
   };
 
-  ASSIGN_OR_RETURN(auto bank_1_key_cache_buffers,
-                   create_and_init_buffers(key_cache_input_names, k_dynamic_dim,
-                                           /*clear_buffer=*/true));
-  ASSIGN_OR_RETURN(
+  ABSL_ASSIGN_OR_RETURN(
+      auto bank_1_key_cache_buffers,
+      create_and_init_buffers(key_cache_input_names, k_dynamic_dim,
+                              /*clear_buffer=*/true));
+  ABSL_ASSIGN_OR_RETURN(
       auto bank_1_value_cache_buffers,
       create_and_init_buffers(value_cache_input_names, v_dynamic_dim,
                               /*clear_buffer=*/false));
@@ -275,14 +277,14 @@ absl::StatusOr<std::unique_ptr<LitertKVCache>> LitertKVCache::Create(
   if (!inplace_update) {
     // Bank 2 buffers are created after Bank 1 shapes are resolved, so no need
     // to pass dynamic_dim.
-    ASSIGN_OR_RETURN(bank_2_key_cache_buffers.emplace(),
-                     create_and_init_buffers(key_cache_input_names,
-                                             /*dynamic_dim=*/std::nullopt,
-                                             /*clear_buffer=*/true));
-    ASSIGN_OR_RETURN(bank_2_value_cache_buffers.emplace(),
-                     create_and_init_buffers(value_cache_input_names,
-                                             /*dynamic_dim=*/std::nullopt,
-                                             /*clear_buffer=*/false));
+    ABSL_ASSIGN_OR_RETURN(bank_2_key_cache_buffers.emplace(),
+                          create_and_init_buffers(key_cache_input_names,
+                                                  /*dynamic_dim=*/std::nullopt,
+                                                  /*clear_buffer=*/true));
+    ABSL_ASSIGN_OR_RETURN(bank_2_value_cache_buffers.emplace(),
+                          create_and_init_buffers(value_cache_input_names,
+                                                  /*dynamic_dim=*/std::nullopt,
+                                                  /*clear_buffer=*/false));
   }
 
   int batch_size;
@@ -335,13 +337,13 @@ absl::Status LitertKVCache::SelectAndCopyFrom(KVCacheInterface& other,
 
   for (auto& [input_name, key_cache_buffer] : bank_1_key_cache_buffers_) {
     RET_CHECK(other_litert->bank_1_key_cache_buffers_.contains(input_name));
-    RETURN_IF_ERROR(SelectAndCopyBuffer(
+    ABSL_RETURN_IF_ERROR(SelectAndCopyBuffer(
         key_cache_buffer, other_litert->bank_1_key_cache_buffers_[input_name],
         batch_index));
   }
   for (auto& [input_name, value_cache_buffer] : bank_1_value_cache_buffers_) {
     RET_CHECK(other_litert->bank_1_value_cache_buffers_.contains(input_name));
-    RETURN_IF_ERROR(SelectAndCopyBuffer(
+    ABSL_RETURN_IF_ERROR(SelectAndCopyBuffer(
         value_cache_buffer,
         other_litert->bank_1_value_cache_buffers_[input_name], batch_index));
   }
@@ -363,13 +365,13 @@ absl::Status LitertKVCache::BroadcastAndCopyFrom(KVCacheInterface& other) {
 
   for (auto& [input_name, key_cache_buffer] : bank_1_key_cache_buffers_) {
     RET_CHECK(other_litert->bank_1_key_cache_buffers_.contains(input_name));
-    RETURN_IF_ERROR(BroadcastAndCopyBuffer(
+    ABSL_RETURN_IF_ERROR(BroadcastAndCopyBuffer(
         key_cache_buffer, batch_size_,
         other_litert->bank_1_key_cache_buffers_[input_name]));
   }
   for (auto& [input_name, value_cache_buffer] : bank_1_value_cache_buffers_) {
     RET_CHECK(other_litert->bank_1_value_cache_buffers_.contains(input_name));
-    RETURN_IF_ERROR(BroadcastAndCopyBuffer(
+    ABSL_RETURN_IF_ERROR(BroadcastAndCopyBuffer(
         value_cache_buffer, batch_size_,
         other_litert->bank_1_value_cache_buffers_[input_name]));
   }

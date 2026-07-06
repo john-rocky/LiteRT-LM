@@ -22,6 +22,7 @@
 #include "absl/log/absl_log.h"  // from @com_google_absl
 #include "absl/memory/memory.h"  // from @com_google_absl
 #include "absl/status/status.h"  // from @com_google_absl
+#include "absl/status/status_macros.h"  // from @com_google_absl
 #include "absl/status/statusor.h"  // from @com_google_absl
 #include "absl/strings/str_cat.h"  // from @com_google_absl
 #include "absl/strings/string_view.h"  // from @com_google_absl
@@ -76,17 +77,18 @@ absl::StatusOr<const litert::Model*> ModelResourcesTask::GetTFLiteModel(
 }
 
 absl::StatusOr<std::unique_ptr<Tokenizer>> ModelResourcesTask::GetTokenizer() {
-  ASSIGN_OR_RETURN(auto string_view,
-                   model_asset_bundle_resources_->GetFile("TOKENIZER_MODEL"));
+  ABSL_ASSIGN_OR_RETURN(
+      auto string_view,
+      model_asset_bundle_resources_->GetFile("TOKENIZER_MODEL"));
   return SentencePieceTokenizer::CreateFromBuffer(string_view);
 }
 
 absl::StatusOr<const proto::LlmMetadata*> ModelResourcesTask::GetLlmMetadata() {
   if (llm_metadata_ == nullptr) {
-    ASSIGN_OR_RETURN(auto string_view,
-                     model_asset_bundle_resources_->GetFile("METADATA"));
-    ASSIGN_OR_RETURN(auto llm_metadata,
-                     ExtractOrConvertLlmMetadata(string_view));
+    ABSL_ASSIGN_OR_RETURN(auto string_view,
+                          model_asset_bundle_resources_->GetFile("METADATA"));
+    ABSL_ASSIGN_OR_RETURN(auto llm_metadata,
+                          ExtractOrConvertLlmMetadata(string_view));
     llm_metadata_ =
         std::make_unique<proto::LlmMetadata>(std::move(llm_metadata));
     ABSL_LOG(INFO) << "The llm metadata: " << llm_metadata_->DebugString();

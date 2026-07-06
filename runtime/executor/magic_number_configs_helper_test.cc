@@ -24,6 +24,7 @@
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include "absl/status/status_macros.h"  // from @com_google_absl
 #include "absl/status/statusor.h"  // from @com_google_absl
 #include "absl/strings/string_view.h"  // from @com_google_absl
 #include "litert/cc/litert_macros.h"  // from @litert
@@ -124,7 +125,8 @@ class ModelResourcesMock : public ModelResources {
 };
 
 absl::StatusOr<LlmExecutorSettings> GetLlmExecutorSettings() {
-  ASSIGN_OR_RETURN(auto model_assets, ModelAssets::Create("dont_care_path"));
+  ABSL_ASSIGN_OR_RETURN(auto model_assets,
+                        ModelAssets::Create("dont_care_path"));
   return LlmExecutorSettings::CreateDefault(std::move(model_assets));
 }
 

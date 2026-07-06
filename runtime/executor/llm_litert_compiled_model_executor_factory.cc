@@ -20,6 +20,7 @@
 
 #include "absl/algorithm/container.h"  // from @com_google_absl
 #include "absl/status/status.h"  // from @com_google_absl
+#include "absl/status/status_macros.h"  // from @com_google_absl
 #include "absl/status/statusor.h"  // from @com_google_absl
 #include "absl/strings/match.h"  // from @com_google_absl
 #include "absl/strings/str_cat.h"  // from @com_google_absl
@@ -77,7 +78,7 @@ absl::StatusOr<bool> IsDynamicModel(const Model& model) {
   {
     std::string kv_cache_k_root_name;
     std::string kv_cache_v_root_name;
-    RETURN_IF_ERROR(GetKVCacheRootNames(
+    ABSL_RETURN_IF_ERROR(GetKVCacheRootNames(
         prefill_signature.InputNames(), prefill_signature.OutputNames(),
         kv_cache_k_root_name, kv_cache_v_root_name));
 
@@ -97,13 +98,13 @@ absl::StatusOr<bool> IsDynamicModel(const Model& model) {
     LITERT_ASSIGN_OR_RETURN(
         SimpleTensor k_tensor,
         prefill_signature.InputTensor(first_kv_cache_k_input_name));
-    ASSIGN_OR_RETURN(bool is_k_dynamic, IsDynamicTensor(k_tensor));
+    ABSL_ASSIGN_OR_RETURN(bool is_k_dynamic, IsDynamicTensor(k_tensor));
 
     std::string first_kv_cache_v_input_name = kv_cache_v_root_name + "0";
     LITERT_ASSIGN_OR_RETURN(
         SimpleTensor v_tensor,
         prefill_signature.InputTensor(first_kv_cache_v_input_name));
-    ASSIGN_OR_RETURN(bool is_v_dynamic, IsDynamicTensor(v_tensor));
+    ABSL_ASSIGN_OR_RETURN(bool is_v_dynamic, IsDynamicTensor(v_tensor));
 
     RET_CHECK(is_k_dynamic == is_v_dynamic)
         << "KV cache k and v need to be dynamic or static at the same time.";
@@ -112,14 +113,15 @@ absl::StatusOr<bool> IsDynamicModel(const Model& model) {
 
   bool is_seq_len_dynamic = false;
   {
-    ASSIGN_OR_RETURN(ModelSignatures signatures,
-                     GetModelSignaturesFromInputOutputNames(
-                         prefill_signature.InputNames(),
-                         prefill_signature.OutputNames(), /*strict=*/false));
+    ABSL_ASSIGN_OR_RETURN(
+        ModelSignatures signatures,
+        GetModelSignaturesFromInputOutputNames(prefill_signature.InputNames(),
+                                               prefill_signature.OutputNames(),
+                                               /*strict=*/false));
     LITERT_ASSIGN_OR_RETURN(
         SimpleTensor position_tensor,
         prefill_signature.InputTensor(signatures.input_positions));
-    ASSIGN_OR_RETURN(is_seq_len_dynamic, IsDynamicTensor(position_tensor));
+    ABSL_ASSIGN_OR_RETURN(is_seq_len_dynamic, IsDynamicTensor(position_tensor));
   }
   RET_CHECK(is_kv_cache_dynamic == is_seq_len_dynamic)
       << "KV cache and seq len need to be dynamic or static at the same time.";
@@ -131,17 +133,20 @@ absl::StatusOr<std::unique_ptr<LlmExecutor>>
 CreateCpuOrGpuLlmLiteRtCompiledModelExecutor(
     LlmExecutorSettings executor_settings, Environment& lrt_env,
     ModelResources& resources) {
-  ASSIGN_OR_RETURN(const litert::Model* litert_model,
-                   resources.GetTFLiteModel(ModelType::kTfLitePrefillDecode));
+  ABSL_ASSIGN_OR_RETURN(
+      const litert::Model* litert_model,
+      resources.GetTFLiteModel(ModelType::kTfLitePrefillDecode));
 
   std::unique_ptr<LlmExecutor> executor;
-  ASSIGN_OR_RETURN(bool is_dynamic_model, IsDynamicModel(*litert_model));
+  ABSL_ASSIGN_OR_RETURN(bool is_dynamic_model, IsDynamicModel(*litert_model));
   if (is_dynamic_model) {
-    ASSIGN_OR_RETURN(executor, LlmLiteRtCompiledModelExecutorDynamic::Create(
-                                   executor_settings, lrt_env, resources));
+    ABSL_ASSIGN_OR_RETURN(executor,
+                          LlmLiteRtCompiledModelExecutorDynamic::Create(
+                              executor_settings, lrt_env, resources));
   } else {
-    ASSIGN_OR_RETURN(executor, LlmLiteRtCompiledModelExecutorStatic::Create(
-                                   executor_settings, lrt_env, resources));
+    ABSL_ASSIGN_OR_RETURN(executor,
+                          LlmLiteRtCompiledModelExecutorStatic::Create(
+                              executor_settings, lrt_env, resources));
   }
 
   return executor;

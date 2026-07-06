@@ -91,14 +91,15 @@ absl::StatusOr<std::unique_ptr<ModelResources>>
 BuildModelResourcesFromTaskFormat(const ModelAssets& model_assets) {
   std::unique_ptr<ModelAssetBundleResources> resources;
   if (model_assets.HasMemoryMappedFile()) {
-    ASSIGN_OR_RETURN(auto memory_mapped_file,
-                     model_assets.GetMemoryMappedFile());
-    ASSIGN_OR_RETURN(resources, ModelAssetBundleResources::Create(
-                                    /*tag=*/"", memory_mapped_file));
+    ABSL_ASSIGN_OR_RETURN(auto memory_mapped_file,
+                          model_assets.GetMemoryMappedFile());
+    ABSL_ASSIGN_OR_RETURN(resources, ModelAssetBundleResources::Create(
+                                         /*tag=*/"", memory_mapped_file));
   } else {
-    ASSIGN_OR_RETURN(auto scoped_file, model_assets.GetOrCreateScopedFile());
-    ASSIGN_OR_RETURN(resources, ModelAssetBundleResources::Create(
-                                    /*tag=*/"", scoped_file));
+    ABSL_ASSIGN_OR_RETURN(auto scoped_file,
+                          model_assets.GetOrCreateScopedFile());
+    ABSL_ASSIGN_OR_RETURN(resources, ModelAssetBundleResources::Create(
+                                         /*tag=*/"", scoped_file));
   }
   auto files_list = resources->ListFiles();
   RET_CHECK(std::find(files_list.begin(), files_list.end(),
@@ -113,16 +114,18 @@ BuildModelResourcesFromLitertLmFormat(const ModelAssets& model_assets,
                                       bool enable_file_backed_model_loading) {
   std::unique_ptr<LitertLmLoader> loader;
   if (model_assets.HasMemoryMappedFile()) {
-    ASSIGN_OR_RETURN(auto memory_mapped_file,
-                     model_assets.GetMemoryMappedFile());
-    ASSIGN_OR_RETURN(loader, LitertLmLoader::Create(memory_mapped_file));
+    ABSL_ASSIGN_OR_RETURN(auto memory_mapped_file,
+                          model_assets.GetMemoryMappedFile());
+    ABSL_ASSIGN_OR_RETURN(loader, LitertLmLoader::Create(memory_mapped_file));
   } else {
     // `BuildModelResourcesFromLitertLmFormat` expects a ScopedFile that it
     // takes ownership of, so we need to duplicate the ScopedFile to keep
     // the original alive.
-    ASSIGN_OR_RETURN(auto scoped_file, model_assets.GetOrCreateScopedFile());
-    ASSIGN_OR_RETURN(auto duplicate_file, scoped_file->Duplicate());
-    ASSIGN_OR_RETURN(loader, LitertLmLoader::Create(std::move(duplicate_file)));
+    ABSL_ASSIGN_OR_RETURN(auto scoped_file,
+                          model_assets.GetOrCreateScopedFile());
+    ABSL_ASSIGN_OR_RETURN(auto duplicate_file, scoped_file->Duplicate());
+    ABSL_ASSIGN_OR_RETURN(loader,
+                          LitertLmLoader::Create(std::move(duplicate_file)));
   }
   return ModelResourcesLitertLm::Create(
       std::move(loader), enable_file_backed_model_loading);
@@ -396,7 +399,7 @@ absl::Status FillAttentionMask(litert::TensorBuffer& mask, int start_timestep,
 absl::StatusOr<std::unique_ptr<ModelResources>>
 BuildLiteRtCompiledModelResources(const ModelAssets& model_assets,
                                   bool enable_file_backed_model_loading) {
-  ASSIGN_OR_RETURN(auto format, GetFileFormat(model_assets));
+  ABSL_ASSIGN_OR_RETURN(auto format, GetFileFormat(model_assets));
   switch (format) {
     case FileFormat::TASK:
       return BuildModelResourcesFromTaskFormat(model_assets);
@@ -435,7 +438,7 @@ absl::Status GenericComputeTokenEmbeddings(
       auto wrapped_embeddings,
       WrapOrCreateTensorBufferFromHostMemory(tensor_type, output_embeddings));
 
-  RETURN_IF_ERROR(embedding_lookup_manager->LookupPrefill(
+  ABSL_RETURN_IF_ERROR(embedding_lookup_manager->LookupPrefill(
       input_tokens_span, &wrapped_embeddings.buffer, 0 /*token_offset=*/));
   if (!wrapped_embeddings.wrapped) {
     LITERT_RETURN_IF_ERROR(wrapped_embeddings.buffer.Read(output_embeddings));
@@ -460,7 +463,7 @@ absl::Status GenericComputeTokenEmbeddings(
     LITERT_ASSIGN_OR_RETURN(auto wrapped_ple_embeddings,
                             WrapOrCreateTensorBufferFromHostMemory(
                                 ple_tensor_type, output_ple_embeddings));
-    RETURN_IF_ERROR(per_layer_embedding_lookup_manager->LookupPrefill(
+    ABSL_RETURN_IF_ERROR(per_layer_embedding_lookup_manager->LookupPrefill(
         input_tokens_span, &wrapped_ple_embeddings.buffer,
         0 /*token_offset=*/));
     if (!wrapped_ple_embeddings.wrapped) {
@@ -486,8 +489,8 @@ absl::Status SetCpuCacheOptions(
     auto scoped_cache_file =
         std::get<std::shared_ptr<litert::lm::ScopedFile>>(*weight_cache_file);
     if (scoped_cache_file != nullptr) {
-      ASSIGN_OR_RETURN(auto duplicated, scoped_cache_file->Duplicate());
-      ASSIGN_OR_RETURN(int fd, duplicated.Release());
+      ABSL_ASSIGN_OR_RETURN(auto duplicated, scoped_cache_file->Duplicate());
+      ABSL_ASSIGN_OR_RETURN(int fd, duplicated.Release());
       cpu_options.SetXNNPackWeightCacheFileDescriptor(fd);
       ABSL_LOG(INFO) << logging_prefix
                      << " use provided cache file descriptor: " << fd;
@@ -531,8 +534,8 @@ absl::Status SetGpuCacheOptions(
     } else {
       auto scoped_cache_file =
           std::get<std::shared_ptr<lm::ScopedFile>>(*weight_cache_file);
-      ASSIGN_OR_RETURN(auto duplicated, scoped_cache_file->Duplicate());
-      ASSIGN_OR_RETURN(int fd, duplicated.Release());
+      ABSL_ASSIGN_OR_RETURN(auto duplicated, scoped_cache_file->Duplicate());
+      ABSL_ASSIGN_OR_RETURN(int fd, duplicated.Release());
       gpu_options.SetWeightCacheFd(fd);
     }
     gpu_options.SetSerializeExternalTensors(true);
@@ -556,8 +559,8 @@ absl::Status SetGpuCacheOptions(
     } else {
       auto scoped_cache_file =
           std::get<std::shared_ptr<lm::ScopedFile>>(*program_cache_file);
-      ASSIGN_OR_RETURN(auto duplicated, scoped_cache_file->Duplicate());
-      ASSIGN_OR_RETURN(int fd, duplicated.Release());
+      ABSL_ASSIGN_OR_RETURN(auto duplicated, scoped_cache_file->Duplicate());
+      ABSL_ASSIGN_OR_RETURN(int fd, duplicated.Release());
       gpu_options.SetProgramCacheFd(fd);
     }
     gpu_options.CacheCompiledProgramsOnly(cache_compiled_shaders_only);
@@ -584,8 +587,8 @@ absl::StatusOr<GpuModelCacheData> GetGpuModelCacheData(
                      ExecutorSettingsBase::kMlDriftWeightCacheSuffix),
         /*check_and_clean=*/true);
     if (!model_path.empty()) {
-      ASSIGN_OR_RETURN(std::string metadata_id,
-                       GetFileCacheIdentifier(model_path));
+      ABSL_ASSIGN_OR_RETURN(std::string metadata_id,
+                            GetFileCacheIdentifier(model_path));
       if (cache_data.program_cache_file.ok() ||
           cache_data.weight_cache_file.ok()) {
         cache_data.cache_key =

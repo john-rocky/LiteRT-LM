@@ -22,6 +22,7 @@
 #include <variant>
 
 #include "absl/status/status.h"  // from @com_google_absl
+#include "absl/status/status_macros.h"  // from @com_google_absl
 #include "absl/status/statusor.h"  // from @com_google_absl
 #include "absl/strings/str_cat.h"  // from @com_google_absl
 #include "absl/strings/str_join.h"  // from @com_google_absl
@@ -185,7 +186,7 @@ absl::StatusOr<LlmExecutorSettings> LlmExecutorSettings::CreateDefault(
     return absl::InvalidArgumentError(
         absl::StrCat("Unsupported backend: ", backend));
   }
-  RETURN_IF_ERROR(settings.SetBackend(backend));
+  ABSL_RETURN_IF_ERROR(settings.SetBackend(backend));
   // Explicitly set the field value to avoid undefined behavior. Setting to 0
   // means that the maximum number of tokens is not set can could be inferred
   // from the model assets (but note that for the model or backend which does

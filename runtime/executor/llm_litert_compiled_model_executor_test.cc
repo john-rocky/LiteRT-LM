@@ -33,6 +33,7 @@
 #include "absl/cleanup/cleanup.h"  // from @com_google_absl
 #include "absl/memory/memory.h"  // from @com_google_absl
 #include "absl/status/status.h"  // from @com_google_absl
+#include "absl/status/status_macros.h"  // from @com_google_absl
 #include "absl/status/statusor.h"  // from @com_google_absl
 #include "absl/strings/str_cat.h"  // from @com_google_absl
 #include "absl/strings/string_view.h"  // from @com_google_absl
@@ -83,8 +84,9 @@ CreateExecutorModelResourcesTask(absl::string_view model_path) {
 
 absl::StatusOr<std::unique_ptr<ModelResources>>
 CreateExecutorModelResourcesLitertLm(absl::string_view model_path) {
-  ASSIGN_OR_RETURN(auto scoped_file, ScopedFile::Open(model_path));
-  ASSIGN_OR_RETURN(auto loader, LitertLmLoader::Create(std::move(scoped_file)));
+  ABSL_ASSIGN_OR_RETURN(auto scoped_file, ScopedFile::Open(model_path));
+  ABSL_ASSIGN_OR_RETURN(auto loader,
+                        LitertLmLoader::Create(std::move(scoped_file)));
   return ModelResourcesLitertLm::Create(std::move(loader));
 }
 
@@ -790,9 +792,9 @@ CreateDynamicExecutor(Environment& env, absl::string_view model_path,
                       uint32_t kv_increment_size = 8,
                       int prefill_chunk_size = -1) {
   auto path = std::filesystem::path(::testing::SrcDir()) / model_path;
-  ASSIGN_OR_RETURN(auto model_resources,
-                   CreateExecutorModelResourcesLitertLm(path.string()));
-  ASSIGN_OR_RETURN(auto model_assets, ModelAssets::Create(path.string()));
+  ABSL_ASSIGN_OR_RETURN(auto model_resources,
+                        CreateExecutorModelResourcesLitertLm(path.string()));
+  ABSL_ASSIGN_OR_RETURN(auto model_assets, ModelAssets::Create(path.string()));
   auto executor_settings =
       LlmExecutorSettings::CreateDefault(model_assets, Backend::CPU);
   executor_settings->SetCacheDir(":nocache");
@@ -802,9 +804,9 @@ CreateDynamicExecutor(Environment& env, absl::string_view model_path,
   config.kv_increment_size = kv_increment_size;
   config.prefill_chunk_size = prefill_chunk_size;
   executor_settings->SetBackendConfig(config);
-  ASSIGN_OR_RETURN(auto executor,
-                   LlmLiteRtCompiledModelExecutorDynamic::Create(
-                       *executor_settings, env, *model_resources));
+  ABSL_ASSIGN_OR_RETURN(auto executor,
+                        LlmLiteRtCompiledModelExecutorDynamic::Create(
+                            *executor_settings, env, *model_resources));
   return std::make_pair(std::move(model_resources), std::move(executor));
 }
 

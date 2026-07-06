@@ -21,6 +21,7 @@
 
 #include "absl/functional/any_invocable.h"  // from @com_google_absl
 #include "absl/status/status.h"  // from @com_google_absl
+#include "absl/status/status_macros.h"  // from @com_google_absl
 #include "absl/status/statusor.h"  // from @com_google_absl
 #include "absl/strings/string_view.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
@@ -51,7 +52,7 @@ absl::StatusOr<int> Prefill(LlmExecutor& executor, ExecutorInputs& inputs,
     return task_response.status();
   }
 
-  ASSIGN_OR_RETURN(auto text_data, inputs.GetTextDataPtr());
+  ABSL_ASSIGN_OR_RETURN(auto text_data, inputs.GetTextDataPtr());
   LITERT_ASSIGN_OR_RETURN(auto ids_buffer_span, ReferTensorBufferAsSpan<int>(
                                                     text_data->GetTokenIds()));
   return ids_buffer_span.back();

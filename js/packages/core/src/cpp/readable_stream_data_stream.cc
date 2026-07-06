@@ -22,6 +22,7 @@
 #include <string>
 
 #include "absl/status/status.h"  // from @com_google_absl
+#include "absl/status/status_macros.h"  // from @com_google_absl
 #include "absl/strings/str_cat.h"  // from @com_google_absl
 
 using emscripten::val;
@@ -58,7 +59,7 @@ absl::Status ReadableStreamDataStream::ReadAndDiscard(void* buffer,
       js_stream_wrapper_.call<val>("readAndDiscard", dest_address, offset, size)
           .await();
 
-  RETURN_IF_ERROR(ParseJsError(result));
+  ABSL_RETURN_IF_ERROR(ParseJsError(result));
   return absl::OkStatus();
 }
 
@@ -74,7 +75,7 @@ absl::Status ReadableStreamDataStream::ReadAndPreserve(void* buffer,
                    .call<val>("readAndPreserve", dest_address, offset, size)
                    .await();
 
-  RETURN_IF_ERROR(ParseJsError(result));
+  ABSL_RETURN_IF_ERROR(ParseJsError(result));
   return absl::OkStatus();
 }
 
@@ -84,7 +85,7 @@ absl::Status ReadableStreamDataStream::Discard(uint64_t offset, uint64_t size) {
   }
   val result = js_stream_wrapper_.call<val>("discard", offset, size).await();
 
-  RETURN_IF_ERROR(ParseJsError(result));
+  ABSL_RETURN_IF_ERROR(ParseJsError(result));
   return absl::OkStatus();
 }
 }  // namespace litert::lm

@@ -17,6 +17,7 @@
 #include <optional>
 
 #include "absl/status/status.h"  // from @com_google_absl
+#include "absl/status/status_macros.h"  // from @com_google_absl
 #include "absl/status/statusor.h"  // from @com_google_absl
 #include "absl/strings/str_cat.h"  // from @com_google_absl
 #include "absl/strings/string_view.h"  // from @com_google_absl
@@ -44,7 +45,7 @@ GetVisionExecutorPropertiesFromModelResources(ModelResources& model_resources) {
     return vision_adapter_model_or.status();
   }
 
-  ASSIGN_OR_RETURN(
+  ABSL_ASSIGN_OR_RETURN(
       auto vision_encoder_model,
       model_resources.GetTFLiteModel(ModelType::kTfLiteVisionEncoder));
 

@@ -25,6 +25,7 @@
 #include "absl/container/flat_hash_map.h"  // from @com_google_absl
 #include "absl/functional/any_invocable.h"  // from @com_google_absl
 #include "absl/status/status.h"  // from @com_google_absl
+#include "absl/status/status_macros.h"  // from @com_google_absl
 #include "absl/status/statusor.h"  // from @com_google_absl
 #include "absl/strings/string_view.h"  // from @com_google_absl
 #include "absl/synchronization/mutex.h"  // from @com_google_absl
@@ -130,7 +131,7 @@ class ConversationConfig {
   //
   // Example usage:
   //   // Create a ConversationConfig instance using the Builder.
-  //   ASSIGN_OR_RETURN(auto conversation_config,
+  //   ABSL_ASSIGN_OR_RETURN(auto conversation_config,
   //                    ConversationConfig::Builder()
   //                        .SetEnableConstrainedDecoding(true)
   //                        .SetPrefillPrefaceOnInit(true)
@@ -264,7 +265,7 @@ class ConversationConfig {
     // Returns a unique pointer to a ConversationConfig.
     absl::StatusOr<std::unique_ptr<ConversationConfig>> BuildUnique(
         const Engine& engine) {
-      ASSIGN_OR_RETURN(ConversationConfig config, Build(engine));
+      ABSL_ASSIGN_OR_RETURN(ConversationConfig config, Build(engine));
       return std::make_unique<ConversationConfig>(std::move(config));
     }
 
@@ -485,18 +486,18 @@ struct OptionalArgs {
 // Example usage:
 //
 //   // Create an Engine instance.
-//   ASSIGN_OR_RETURN(auto engine, Engine::Create(model_assets));
+//   ABSL_ASSIGN_OR_RETURN(auto engine, Engine::Create(model_assets));
 //
 //   // Create a ConversationConfig instance from the Engine.
-//   ASSIGN_OR_RETURN(auto conversation_config,
+//   ABSL_ASSIGN_OR_RETURN(auto conversation_config,
 //                    ConversationConfig::CreateDefault(*engine));
 //
 //   // Create a Conversation instance.
-//   ASSIGN_OR_RETURN(auto conversation,
+//   ABSL_ASSIGN_OR_RETURN(auto conversation,
 //       Conversation::Create(*engine, conversation_config));
 //
 //   // Send a message to the LLM and returns the complete message.
-//   ASSIGN_OR_RETURN(const Message message,
+//   ABSL_ASSIGN_OR_RETURN(const Message message,
 //                    conversation->SendMessage(Message{
 //                        {"role", "user"}, {"content", "Hello world!"}}));
 //

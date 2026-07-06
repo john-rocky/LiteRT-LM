@@ -17,6 +17,7 @@
 #include <limits>
 
 #include "absl/status/status.h"  // from @com_google_absl
+#include "absl/status/status_macros.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
 #include "litert/cc/litert_element_type.h"  // from @litert
 #include "litert/cc/litert_layout.h"  // from @litert
@@ -66,8 +67,8 @@ absl::Status ConstrainedDecoder::ProcessLogits(
       << "] does not match the expected batch size [" << batch_size_ << "].";
   for (int b = 0; b < batch_size; ++b) {
     auto& constraint_state = constraint_states_[b];
-    ASSIGN_OR_RETURN(auto bitmap,
-                     constraint_->ComputeBitmap(*constraint_state));
+    ABSL_ASSIGN_OR_RETURN(auto bitmap,
+                          constraint_->ComputeBitmap(*constraint_state));
     for (int i = 0; i < vocab_size; ++i) {
       if (!bitmap->Get(i)) {
         logits.data()[b * vocab_size + i] =
@@ -99,8 +100,8 @@ absl::Status ConstrainedDecoder::ProcessLogits(
       << "] does not match the expected batch size [" << batch_size_ << "].";
   for (int b = 0; b < batch_size; ++b) {
     auto& constraint_state = constraint_states_[b];
-    ASSIGN_OR_RETURN(auto bitmap,
-                     constraint_->ComputeBitmap(*constraint_state));
+    ABSL_ASSIGN_OR_RETURN(auto bitmap,
+                          constraint_->ComputeBitmap(*constraint_state));
     for (int i = 0; i < vocab_size; ++i) {
       if (!bitmap->Get(i)) {
         logits.data()[b * vocab_size + i] = tflite::half::min();
@@ -123,7 +124,7 @@ absl::Status ConstrainedDecoder::UpdateState(absl::Span<int> next_token_ids) {
       << "] does not match the expected batch size [" << batch_size_ << "].";
   for (int i = 0; i < batch_size_; ++i) {
     auto& constraint_state = constraint_states_[i];
-    ASSIGN_OR_RETURN(
+    ABSL_ASSIGN_OR_RETURN(
         constraint_state,
         constraint_->ComputeNext(*constraint_state, next_token_ids[i]));
     if (constraint_->IsEnded(*constraint_state)) {

@@ -22,6 +22,7 @@
 
 #include "absl/log/absl_log.h"  // from @com_google_absl
 #include "absl/status/status.h"  // from @com_google_absl
+#include "absl/status/status_macros.h"  // from @com_google_absl
 #include "absl/status/statusor.h"  // from @com_google_absl
 #include "runtime/components/prompt_template.h"
 #include "runtime/conversation/io_types.h"
@@ -61,20 +62,20 @@ absl::StatusOr<DataProcessorConfig> CreateGemma3DataProcessorConfig(
   if (model_type.has_gemma3n()) {
     proto::Gemma3N gemma3n = model_type.gemma3n();
     if (gemma3n.has_start_of_image_token()) {
-      ASSIGN_OR_RETURN(config.boi_token,
-                       GetTokenString(gemma3n.start_of_image_token()));
+      ABSL_ASSIGN_OR_RETURN(config.boi_token,
+                            GetTokenString(gemma3n.start_of_image_token()));
     }
     if (gemma3n.has_end_of_image_token()) {
-      ASSIGN_OR_RETURN(config.eoi_token,
-                       GetTokenString(gemma3n.end_of_image_token()));
+      ABSL_ASSIGN_OR_RETURN(config.eoi_token,
+                            GetTokenString(gemma3n.end_of_image_token()));
     }
     if (gemma3n.has_start_of_audio_token()) {
-      ASSIGN_OR_RETURN(config.boa_token,
-                       GetTokenString(gemma3n.start_of_audio_token()));
+      ABSL_ASSIGN_OR_RETURN(config.boa_token,
+                            GetTokenString(gemma3n.start_of_audio_token()));
     }
     if (gemma3n.has_end_of_audio_token()) {
-      ASSIGN_OR_RETURN(config.eoa_token,
-                       GetTokenString(gemma3n.end_of_audio_token()));
+      ABSL_ASSIGN_OR_RETURN(config.eoa_token,
+                            GetTokenString(gemma3n.end_of_audio_token()));
     }
     const auto& default_gemma3n = proto::Gemma3N::default_instance();
     if (gemma3n.image_tensor_height() !=
@@ -87,12 +88,12 @@ absl::StatusOr<DataProcessorConfig> CreateGemma3DataProcessorConfig(
   } else if (model_type.has_gemma3()) {
     proto::Gemma3 gemma3 = model_type.gemma3();
     if (gemma3.has_start_of_image_token()) {
-      ASSIGN_OR_RETURN(config.boi_token,
-                       GetTokenString(gemma3.start_of_image_token()));
+      ABSL_ASSIGN_OR_RETURN(config.boi_token,
+                            GetTokenString(gemma3.start_of_image_token()));
     }
     if (gemma3.has_end_of_image_token()) {
-      ASSIGN_OR_RETURN(config.eoi_token,
-                       GetTokenString(gemma3.end_of_image_token()));
+      ABSL_ASSIGN_OR_RETURN(config.eoi_token,
+                            GetTokenString(gemma3.end_of_image_token()));
     }
     const auto& default_gemma3 = proto::Gemma3::default_instance();
     if (gemma3.image_tensor_height() != default_gemma3.image_tensor_height()) {
@@ -104,20 +105,20 @@ absl::StatusOr<DataProcessorConfig> CreateGemma3DataProcessorConfig(
   } else if (model_type.has_gemma4()) {
     proto::Gemma4 gemma4 = model_type.gemma4();
     if (gemma4.has_start_of_image_token()) {
-      ASSIGN_OR_RETURN(config.boi_token,
-                       GetTokenString(gemma4.start_of_image_token()));
+      ABSL_ASSIGN_OR_RETURN(config.boi_token,
+                            GetTokenString(gemma4.start_of_image_token()));
     }
     if (gemma4.has_end_of_image_token()) {
-      ASSIGN_OR_RETURN(config.eoi_token,
-                       GetTokenString(gemma4.end_of_image_token()));
+      ABSL_ASSIGN_OR_RETURN(config.eoi_token,
+                            GetTokenString(gemma4.end_of_image_token()));
     }
     if (gemma4.has_start_of_audio_token()) {
-      ASSIGN_OR_RETURN(config.boa_token,
-                       GetTokenString(gemma4.start_of_audio_token()));
+      ABSL_ASSIGN_OR_RETURN(config.boa_token,
+                            GetTokenString(gemma4.start_of_audio_token()));
     }
     if (gemma4.has_end_of_audio_token()) {
-      ASSIGN_OR_RETURN(config.eoa_token,
-                       GetTokenString(gemma4.end_of_audio_token()));
+      ABSL_ASSIGN_OR_RETURN(config.eoa_token,
+                            GetTokenString(gemma4.end_of_audio_token()));
     }
   } else {
     return absl::InvalidArgumentError(
@@ -188,20 +189,20 @@ absl::StatusOr<DataProcessorConfig> CreateGemma4DataProcessorConfig(
   Gemma4DataProcessorConfig config;
   proto::Gemma4 gemma4 = model_type.gemma4();
   if (gemma4.has_start_of_image_token()) {
-    ASSIGN_OR_RETURN(config.boi_token,
-                     GetTokenString(gemma4.start_of_image_token()));
+    ABSL_ASSIGN_OR_RETURN(config.boi_token,
+                          GetTokenString(gemma4.start_of_image_token()));
   }
   if (gemma4.has_end_of_image_token()) {
-    ASSIGN_OR_RETURN(config.eoi_token,
-                     GetTokenString(gemma4.end_of_image_token()));
+    ABSL_ASSIGN_OR_RETURN(config.eoi_token,
+                          GetTokenString(gemma4.end_of_image_token()));
   }
   if (gemma4.has_start_of_audio_token()) {
-    ASSIGN_OR_RETURN(config.boa_token,
-                     GetTokenString(gemma4.start_of_audio_token()));
+    ABSL_ASSIGN_OR_RETURN(config.boa_token,
+                          GetTokenString(gemma4.start_of_audio_token()));
   }
   if (gemma4.has_end_of_audio_token()) {
-    ASSIGN_OR_RETURN(config.eoa_token,
-                     GetTokenString(gemma4.end_of_audio_token()));
+    ABSL_ASSIGN_OR_RETURN(config.eoa_token,
+                          GetTokenString(gemma4.end_of_audio_token()));
   }
   const auto& default_gemma4 = proto::Gemma4::default_instance();
   if (gemma4.code_fence_start() != default_gemma4.code_fence_start()) {
@@ -349,12 +350,13 @@ absl::StatusOr<DataProcessorConfig> CreateGenericDataProcessorConfig(
 
     // Image formatting
     if (generic_model.has_start_of_image_token()) {
-      ASSIGN_OR_RETURN(multi_config.processing_config.boi_token,
-                       GetTokenString(generic_model.start_of_image_token()));
+      ABSL_ASSIGN_OR_RETURN(
+          multi_config.processing_config.boi_token,
+          GetTokenString(generic_model.start_of_image_token()));
     }
     if (generic_model.has_end_of_image_token()) {
-      ASSIGN_OR_RETURN(multi_config.processing_config.eoi_token,
-                       GetTokenString(generic_model.end_of_image_token()));
+      ABSL_ASSIGN_OR_RETURN(multi_config.processing_config.eoi_token,
+                            GetTokenString(generic_model.end_of_image_token()));
     }
     if (generic_model.has_image_prefix()) {
       multi_config.processing_config.image_prefix =
@@ -452,12 +454,13 @@ absl::StatusOr<DataProcessorConfig> CreateGenericDataProcessorConfig(
 
     // Audio formatting
     if (generic_model.has_start_of_audio_token()) {
-      ASSIGN_OR_RETURN(multi_config.processing_config.boa_token,
-                       GetTokenString(generic_model.start_of_audio_token()));
+      ABSL_ASSIGN_OR_RETURN(
+          multi_config.processing_config.boa_token,
+          GetTokenString(generic_model.start_of_audio_token()));
     }
     if (generic_model.has_end_of_audio_token()) {
-      ASSIGN_OR_RETURN(multi_config.processing_config.eoa_token,
-                       GetTokenString(generic_model.end_of_audio_token()));
+      ABSL_ASSIGN_OR_RETURN(multi_config.processing_config.eoa_token,
+                            GetTokenString(generic_model.end_of_audio_token()));
     }
     if (generic_model.has_audio_prefix()) {
       multi_config.processing_config.audio_prefix =

@@ -32,6 +32,7 @@
 #include "absl/log/absl_log.h"  // from @com_google_absl
 #include "absl/memory/memory.h"  // from @com_google_absl
 #include "absl/status/status.h"  // from @com_google_absl
+#include "absl/status/status_macros.h"  // from @com_google_absl
 #include "absl/status/statusor.h"  // from @com_google_absl
 #include "absl/strings/str_cat.h"  // from @com_google_absl
 #include "absl/strings/string_view.h"  // from @com_google_absl
@@ -100,7 +101,7 @@ SerialExecutionManager::Create(
     audio_executor_settings,
     ::litert::Environment* absl_nullable litert_env,
     std::unique_ptr<AudioExecutor> absl_nullable audio_executor) {
-  ASSIGN_OR_RETURN(
+  ABSL_ASSIGN_OR_RETURN(
       auto resource_manager,
       ResourceManager::Create(model_resources, std::move(llm_executor),
                               std::move(vision_executor_settings),
@@ -130,7 +131,7 @@ absl::Status SerialExecutionManager::WaitUntilDone(TaskId task_id,
           absl::StrCat("WaitUntilDone timed out for task ", task_id, " after ",
                        absl::FormatDuration(timeout)));
     }
-    RETURN_IF_ERROR(RunNextTask());
+    ABSL_RETURN_IF_ERROR(RunNextTask());
   }
 }
 
@@ -154,7 +155,7 @@ absl::Status SerialExecutionManager::WaitUntilSessionDone(
           absl::StrCat("WaitUntilSessionDone timed out for session ",
                        session_id, " after ", absl::FormatDuration(timeout)));
     }
-    RETURN_IF_ERROR(RunNextTask());
+    ABSL_RETURN_IF_ERROR(RunNextTask());
   }
 }
 
@@ -165,26 +166,27 @@ absl::Status SerialExecutionManager::WaitUntilAllDone(absl::Duration timeout) {
       return absl::DeadlineExceededError(absl::StrCat(
           "WaitUntilAllDone timed out after ", absl::FormatDuration(timeout)));
     }
-    RETURN_IF_ERROR(RunNextTask());
+    ABSL_RETURN_IF_ERROR(RunNextTask());
   }
   return absl::OkStatus();
 }
 
 absl::StatusOr<SessionId> SerialExecutionManager::RegisterNewSession(
     SessionConfig session_config, std::optional<BenchmarkInfo> benchmark_info) {
-  ASSIGN_OR_RETURN(auto context_handler,
-                   resource_manager_->CreateContextHandler(session_config));
+  ABSL_ASSIGN_OR_RETURN(
+      auto context_handler,
+      resource_manager_->CreateContextHandler(session_config));
   std::unique_ptr<Sampler> sampler;
   if (session_config.UseExternalSampler()) {
     if (session_config.GetSamplerBackend() != Backend::CPU) {
       return absl::InvalidArgumentError(
           "External sampler currently only supports CPU backend.");
     }
-    ASSIGN_OR_RETURN(sampler,
-                     CreateSampler(session_config.GetSamplerBackend(),
-                                   session_config.GetNumOutputCandidates(),
-                                   session_config.GetSamplerParams(),
-                                   litert_env_ ? litert_env_->Get() : nullptr));
+    ABSL_ASSIGN_OR_RETURN(
+        sampler, CreateSampler(session_config.GetSamplerBackend(),
+                               session_config.GetNumOutputCandidates(),
+                               session_config.GetSamplerParams(),
+                               litert_env_ ? litert_env_->Get() : nullptr));
   }
   auto stop_token_detector = std::make_unique<StopTokenDetector>(1);
   for (const auto& stop_token_sequence : session_config.GetStopTokenIds()) {
@@ -208,10 +210,10 @@ absl::StatusOr<SessionId> SerialExecutionManager::RegisterNewSession(
         "Session ", session_id, " already exists in session list."));
   }
   if (session_info->session_config.AudioModalityEnabled()) {
-    RETURN_IF_ERROR(resource_manager_->TryLoadingAudioExecutor());
+    ABSL_RETURN_IF_ERROR(resource_manager_->TryLoadingAudioExecutor());
   }
   if (session_info->session_config.VisionModalityEnabled()) {
-    RETURN_IF_ERROR(resource_manager_->TryLoadingVisionExecutor());
+    ABSL_RETURN_IF_ERROR(resource_manager_->TryLoadingVisionExecutor());
   }
   session_lookup_.insert({session_id, std::move(session_info)});
 
@@ -225,8 +227,8 @@ absl::Status SerialExecutionManager::ReleaseSession(SessionId session_id) {
   }
   if (session_lookup_.at(session_id)->session_config.AudioModalityEnabled() &&
       session_lookup_.size() == 1) {
-    ASSIGN_OR_RETURN(auto audio_executor,
-                     resource_manager_->AcquireAudioExecutor());
+    ABSL_ASSIGN_OR_RETURN(auto audio_executor,
+                          resource_manager_->AcquireAudioExecutor());
     audio_executor->Reset().IgnoreError();
   }
   std::erase_if(ready_queue_, [this, session_id](TaskId tid) {
@@ -360,7 +362,7 @@ absl::Status SerialExecutionManager::CreateTask(
 
   if (task_state == TaskState::kCreated &&
       task_lookup_.at(task_id).dependent_tasks.empty()) {
-    RETURN_IF_ERROR(QueueTask(task_id));
+    ABSL_RETURN_IF_ERROR(QueueTask(task_id));
   }
   return absl::OkStatus();
 }
@@ -379,7 +381,7 @@ absl::Status SerialExecutionManager::QueueTask(TaskId task_id) {
 
   ready_queue_.push_back(task_id);
   task_lookup_.at(task_id).callback(Responses(TaskState::kQueued));
-  RETURN_IF_ERROR(UpdateTaskState(task_id, TaskState::kQueued));
+  ABSL_RETURN_IF_ERROR(UpdateTaskState(task_id, TaskState::kQueued));
 
   return absl::OkStatus();
 }
@@ -428,7 +430,7 @@ SerialExecutionManager::StartTask(TaskId task_id) {
   }
 
   task_lookup_.at(task_id).callback(Responses(TaskState::kProcessing));
-  RETURN_IF_ERROR(UpdateTaskState(task_id, TaskState::kProcessing));
+  ABSL_RETURN_IF_ERROR(UpdateTaskState(task_id, TaskState::kProcessing));
 
   std::shared_ptr<SessionInfo> session_info =
       session_lookup_.at(task_lookup_.at(task_id).session_id);
@@ -440,7 +442,7 @@ absl::Status SerialExecutionManager::FinishTask(
     TaskId task_id, absl::StatusOr<Responses> responses,
     absl::AnyInvocable<void(absl::StatusOr<Responses>)> absl_nonnull callback) {
   auto invoke_callback_and_return = [&](absl::Status status) -> absl::Status {
-    RETURN_IF_ERROR(UpdateTaskState(task_id, TaskState::kFailed));
+    ABSL_RETURN_IF_ERROR(UpdateTaskState(task_id, TaskState::kFailed));
     callback(status);
     return status;
   };
@@ -478,14 +480,14 @@ absl::Status SerialExecutionManager::FinishTask(
       }
       task_lookup_.at(following_task_id).dependent_tasks.erase(task_id);
       if (task_lookup_.at(following_task_id).dependent_tasks.empty()) {
-        RETURN_IF_ERROR(QueueTask(following_task_id));
+        ABSL_RETURN_IF_ERROR(QueueTask(following_task_id));
       }
     }
   }
 
   TaskState next_task_state =
       responses.ok() ? responses->GetTaskState() : TaskState::kFailed;
-  RETURN_IF_ERROR(UpdateTaskState(task_id, next_task_state));
+  ABSL_RETURN_IF_ERROR(UpdateTaskState(task_id, next_task_state));
   callback(std::move(responses));
 
   return absl::OkStatus();
@@ -515,8 +517,8 @@ SerialExecutionManager::FollowingWaitingTasks(TaskId task_id) {
     }
     if (!IsTaskEndState(task_lookup_.at(following_task_id).task_state)) {
       following_waiting_tasks.insert(following_task_id);
-      ASSIGN_OR_RETURN(auto next_following_waiting_tasks,
-                       FollowingWaitingTasks(following_task_id));
+      ABSL_ASSIGN_OR_RETURN(auto next_following_waiting_tasks,
+                            FollowingWaitingTasks(following_task_id));
       following_waiting_tasks.insert(next_following_waiting_tasks.begin(),
                                      next_following_waiting_tasks.end());
     }
@@ -548,7 +550,7 @@ absl::Status SerialExecutionManager::UpdateAllTasksToState(
       task_lookup_.at(task_id).callback(Responses(task_state));
     }
     task_lookup_.at(task_id).dependent_tasks.clear();
-    RETURN_IF_ERROR(UpdateTaskState(task_id, task_state));
+    ABSL_RETURN_IF_ERROR(UpdateTaskState(task_id, task_state));
   }
   return absl::OkStatus();
 }
@@ -563,8 +565,8 @@ SerialExecutionManager::ProcessAndCombineContents(
   for (const auto& preprocessed_content : preprocessed_contents) {
     if (const auto* input_text =
             std::get_if<InputText>(&preprocessed_content)) {
-      ASSIGN_OR_RETURN(const auto* token_ids,
-                       input_text->GetPreprocessedTextTensor());
+      ABSL_ASSIGN_OR_RETURN(const auto* token_ids,
+                            input_text->GetPreprocessedTextTensor());
       if (token_ids == nullptr) {
         return absl::InvalidArgumentError("Preprocessed text tensor is null.");
       }
@@ -575,34 +577,34 @@ SerialExecutionManager::ProcessAndCombineContents(
     } else if (const auto* input_image =
                    std::get_if<InputImage>(&preprocessed_content)) {
       if (benchmark_info.has_value()) {
-        RETURN_IF_ERROR(benchmark_info->TimeMarkDelta("vision_executor"));
+        ABSL_RETURN_IF_ERROR(benchmark_info->TimeMarkDelta("vision_executor"));
       }
       ExecutorVisionData single_image_data;
       if (input_image->IsTensorBuffer()) {
-        ASSIGN_OR_RETURN(auto tensor_buffer,
-                         input_image->GetPreprocessedImageTensor());
-        ASSIGN_OR_RETURN(auto vision_executor,
-                         resource_manager_->AcquireVisionExecutor());
-        ASSIGN_OR_RETURN(single_image_data,
-                         vision_executor->Encode(*tensor_buffer));
+        ABSL_ASSIGN_OR_RETURN(auto tensor_buffer,
+                              input_image->GetPreprocessedImageTensor());
+        ABSL_ASSIGN_OR_RETURN(auto vision_executor,
+                              resource_manager_->AcquireVisionExecutor());
+        ABSL_ASSIGN_OR_RETURN(single_image_data,
+                              vision_executor->Encode(*tensor_buffer));
       } else if (input_image->IsTensorBufferMap()) {
-        ASSIGN_OR_RETURN(auto tensor_buffer_map,
-                         input_image->GetPreprocessedImageTensorMap());
-        ASSIGN_OR_RETURN(auto vision_executor,
-                         resource_manager_->AcquireVisionExecutor());
-        ASSIGN_OR_RETURN(single_image_data,
-                         vision_executor->Encode(*tensor_buffer_map));
+        ABSL_ASSIGN_OR_RETURN(auto tensor_buffer_map,
+                              input_image->GetPreprocessedImageTensorMap());
+        ABSL_ASSIGN_OR_RETURN(auto vision_executor,
+                              resource_manager_->AcquireVisionExecutor());
+        ABSL_ASSIGN_OR_RETURN(single_image_data,
+                              vision_executor->Encode(*tensor_buffer_map));
       } else {
         return absl::FailedPreconditionError(
             "Image tensor or tensor map is null in preprocessed_contents.");
       }
       if (benchmark_info.has_value()) {
-        RETURN_IF_ERROR(benchmark_info->TimeMarkDelta("vision_executor"));
+        ABSL_RETURN_IF_ERROR(benchmark_info->TimeMarkDelta("vision_executor"));
       }
-      ASSIGN_OR_RETURN(auto embeddings_ptr,
-                       single_image_data.GetEmbeddingsPtr());
-      ASSIGN_OR_RETURN(const auto& dimensions,
-                       TensorBufferDims(*embeddings_ptr));
+      ABSL_ASSIGN_OR_RETURN(auto embeddings_ptr,
+                            single_image_data.GetEmbeddingsPtr());
+      ABSL_ASSIGN_OR_RETURN(const auto& dimensions,
+                            TensorBufferDims(*embeddings_ptr));
       // The last two dimensions are [..., image_token_num, model_dimension].
       const int image_token_num = dimensions.at(dimensions.size() - 2);
       combined_token_ids.insert(combined_token_ids.end(), image_token_num,
@@ -617,17 +619,17 @@ SerialExecutionManager::ProcessAndCombineContents(
         return absl::FailedPreconditionError(
             "The audio is not a preprocessed tensor.");
       }
-      ASSIGN_OR_RETURN(const auto* spectrogram_tensor,
-                       input_audio->GetPreprocessedAudioTensor());
+      ABSL_ASSIGN_OR_RETURN(const auto* spectrogram_tensor,
+                            input_audio->GetPreprocessedAudioTensor());
       if (benchmark_info.has_value()) {
-        RETURN_IF_ERROR(benchmark_info->TimeMarkDelta("audio_executor"));
+        ABSL_RETURN_IF_ERROR(benchmark_info->TimeMarkDelta("audio_executor"));
       }
-      ASSIGN_OR_RETURN(auto audio_executor,
-                       resource_manager_->AcquireAudioExecutor());
-      ASSIGN_OR_RETURN(auto single_audio_data,
-                       audio_executor->Encode(*spectrogram_tensor));
+      ABSL_ASSIGN_OR_RETURN(auto audio_executor,
+                            resource_manager_->AcquireAudioExecutor());
+      ABSL_ASSIGN_OR_RETURN(auto single_audio_data,
+                            audio_executor->Encode(*spectrogram_tensor));
       if (benchmark_info.has_value()) {
-        RETURN_IF_ERROR(benchmark_info->TimeMarkDelta("audio_executor"));
+        ABSL_RETURN_IF_ERROR(benchmark_info->TimeMarkDelta("audio_executor"));
       }
       const int num_audio_tokens = single_audio_data.GetValidTokens();
       all_audio_data.push_back(std::move(single_audio_data));
@@ -649,19 +651,19 @@ SerialExecutionManager::ProcessAndCombineContents(
 
   std::optional<ExecutorVisionData> combined_image_data = std::nullopt;
   if (!all_image_data.empty()) {
-    ASSIGN_OR_RETURN(combined_image_data,
-                     CombineExecutorVisionData(all_image_data));
+    ABSL_ASSIGN_OR_RETURN(combined_image_data,
+                          CombineExecutorVisionData(all_image_data));
   }
   std::optional<ExecutorAudioData> combined_audio_data = std::nullopt;
   if (!all_audio_data.empty()) {
-    ASSIGN_OR_RETURN(combined_audio_data,
-                     CombineExecutorAudioData(all_audio_data));
+    ABSL_ASSIGN_OR_RETURN(combined_audio_data,
+                          CombineExecutorAudioData(all_audio_data));
   }
 
   last_prefill_token_id_ = combined_token_ids.back();
 
-  ASSIGN_OR_RETURN(auto token_ids_buffer,
-                   tokenizer_->TokenIdsToTensorBuffer(combined_token_ids));
+  ABSL_ASSIGN_OR_RETURN(auto token_ids_buffer,
+                        tokenizer_->TokenIdsToTensorBuffer(combined_token_ids));
 
   return ExecutorInputs(ExecutorTextData(std::move(token_ids_buffer)),
                         std::move(combined_image_data),
@@ -991,18 +993,18 @@ absl::Status SerialExecutionManager::AddTextScoringTask(
 
 absl::StatusOr<int> SerialExecutionManager::GetCurrentStep(
     const SessionInfo& session_info) {
-  ASSIGN_OR_RETURN(auto llm_executor,
-                   resource_manager_->AcquireExecutorWithContextHandler(
-                       session_info.context_handler));
+  ABSL_ASSIGN_OR_RETURN(auto llm_executor,
+                        resource_manager_->AcquireExecutorWithContextHandler(
+                            session_info.context_handler));
   return llm_executor->GetCurrentStep();
 }
 
 absl::Status SerialExecutionManager::SetCurrentStep(
     const SessionInfo& session_info, int target_step) {
-  ASSIGN_OR_RETURN(auto llm_executor,
-                   resource_manager_->AcquireExecutorWithContextHandler(
-                       session_info.context_handler));
-  ASSIGN_OR_RETURN(int current_step, llm_executor->GetCurrentStep());
+  ABSL_ASSIGN_OR_RETURN(auto llm_executor,
+                        resource_manager_->AcquireExecutorWithContextHandler(
+                            session_info.context_handler));
+  ABSL_ASSIGN_OR_RETURN(int current_step, llm_executor->GetCurrentStep());
   if (target_step > current_step) {
     return absl::InvalidArgumentError(absl::StrCat(
         "Target step is greater than the current step: ", current_step));

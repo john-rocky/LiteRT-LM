@@ -23,10 +23,10 @@
 #include "absl/base/attributes.h"  // from @com_google_absl
 #include "absl/base/nullability.h"  // from @com_google_absl
 #include "absl/cleanup/cleanup.h"  // from @com_google_absl
-#include "absl/log/absl_check.h"  // from @com_google_absl
 #include "absl/log/absl_log.h"  // from @com_google_absl
 #include "absl/memory/memory.h"  // from @com_google_absl
 #include "absl/status/status.h"  // from @com_google_absl
+#include "absl/status/status_macros.h"  // from @com_google_absl
 #include "absl/status/statusor.h"  // from @com_google_absl
 #include "absl/strings/str_cat.h"  // from @com_google_absl
 #include "litert/cc/internal/litert_handle.h"  // from @litert
@@ -387,7 +387,7 @@ class TopKOpenClCApiSampler : public TopKCApiSampler {
         activation_data_type.has_value() ? &activation_data_type.value()
                                          : nullptr,
         &sampler_params, &sampler, &error_msg);
-    RETURN_IF_ERROR(CreateStatusAndFreeErrorMsg(error_code, error_msg));
+    ABSL_RETURN_IF_ERROR(CreateStatusAndFreeErrorMsg(error_code, error_msg));
     RET_CHECK(sampler) << "Failed to create sampler";
     return absl::WrapUnique(
         new TopKOpenClCApiSampler(std::move(capi), sampler));
@@ -463,7 +463,7 @@ class TopKWebGpuCApiSampler : public TopKCApiSampler {
         activation_data_type.has_value() ? &activation_data_type.value()
                                          : nullptr,
         &sampler_params, &sampler, &error_msg);
-    RETURN_IF_ERROR(CreateStatusAndFreeErrorMsg(error_code, error_msg));
+    ABSL_RETURN_IF_ERROR(CreateStatusAndFreeErrorMsg(error_code, error_msg));
     RET_CHECK(sampler) << "Failed to create sampler";
     return absl::WrapUnique(
         new TopKWebGpuCApiSampler(std::move(capi), sampler));
@@ -542,7 +542,7 @@ class TopKMetalCApiSampler : public TopKCApiSampler {
         activation_data_type.has_value() ? &activation_data_type.value()
                                          : nullptr,
         &sampler_params, &sampler, &error_msg);
-    RETURN_IF_ERROR(CreateStatusAndFreeErrorMsg(error_code, error_msg));
+    ABSL_RETURN_IF_ERROR(CreateStatusAndFreeErrorMsg(error_code, error_msg));
     RET_CHECK(sampler);
     return absl::WrapUnique(new TopKMetalCApiSampler(std::move(capi), sampler));
   }

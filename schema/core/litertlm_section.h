@@ -28,6 +28,7 @@
 
 #include "absl/log/absl_log.h"  // from @com_google_absl
 #include "absl/status/status.h"  // from @com_google_absl
+#include "absl/status/status_macros.h"  // from @com_google_absl
 #include "absl/strings/str_cat.h"  // from @com_google_absl
 #include "runtime/util/status_macros.h"  // NOLINT
 #include "zconf.h"  // from @zlib
@@ -261,7 +262,7 @@ class ZlibBackendedSectionStream : public SectionStreamBase {
       return absl::OkStatus();
     }
 
-    RETURN_IF_ERROR(base_stream_->Prepare());  // NOLINT
+    ABSL_RETURN_IF_ERROR(base_stream_->Prepare());  // NOLINT
 
     // Initialize zlib stream structure
     z_stream strm;

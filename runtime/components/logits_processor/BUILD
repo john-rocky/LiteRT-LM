@@ -77,7 +77,6 @@ cc_library(
     deps = [
         ":logits_processor",
         ":repetition_penalty_config",
-        "@com_google_absl//absl/cleanup",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/types:span",

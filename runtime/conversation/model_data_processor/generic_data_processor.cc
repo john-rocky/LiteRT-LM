@@ -22,6 +22,7 @@
 
 #include "absl/memory/memory.h"  // from @com_google_absl
 #include "absl/status/status.h"  // from @com_google_absl
+#include "absl/status/status_macros.h"  // from @com_google_absl
 #include "absl/status/statusor.h"  // from @com_google_absl
 #include "absl/strings/string_view.h"  // from @com_google_absl
 #include "nlohmann/json_fwd.hpp"  // from @nlohmann_json
@@ -46,9 +47,9 @@ GenericDataProcessor::Create(GenericDataProcessorConfig config,
       image_preprocessor = ImagePreprocessor::Create();
     }
     if (config.multimodal->audio_enabled) {
-      ASSIGN_OR_RETURN(audio_preprocessor,
-                       AudioPreprocessorMiniAudio::Create(
-                           config.multimodal->audio_preprocessor_config));
+      ABSL_ASSIGN_OR_RETURN(audio_preprocessor,
+                            AudioPreprocessorMiniAudio::Create(
+                                config.multimodal->audio_preprocessor_config));
     }
   }
 
@@ -119,9 +120,9 @@ absl::Status GenericDataProcessor::CloneStateImpl(
   if (generic_other.audio_preprocessor_ != nullptr) {
     if (audio_preprocessor_ == nullptr) {
       const auto& multi_config = *generic_other.config_.multimodal;
-      ASSIGN_OR_RETURN(audio_preprocessor_,
-                       AudioPreprocessorMiniAudio::Create(
-                           multi_config.audio_preprocessor_config));
+      ABSL_ASSIGN_OR_RETURN(audio_preprocessor_,
+                            AudioPreprocessorMiniAudio::Create(
+                                multi_config.audio_preprocessor_config));
     }
     *static_cast<AudioPreprocessorMiniAudio*>(audio_preprocessor_.get()) =
         *static_cast<AudioPreprocessorMiniAudio*>(

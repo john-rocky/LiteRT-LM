@@ -29,6 +29,7 @@
 #include "absl/log/absl_log.h"  // from @com_google_absl
 #include "absl/memory/memory.h"  // from @com_google_absl
 #include "absl/status/status.h"  // from @com_google_absl
+#include "absl/status/status_macros.h"  // from @com_google_absl
 #include "absl/status/statusor.h"  // from @com_google_absl
 #include "absl/strings/match.h"  // from @com_google_absl
 #include "absl/strings/numbers.h"  // from @com_google_absl
@@ -205,7 +206,7 @@ VisionLiteRtCompiledModelExecutor::VisionEncoder::Create(
     const VisionExecutorProperties& vision_executor_properties) {
   auto handler = std::unique_ptr<VisionEncoder>(new VisionEncoder(
       env, model, vision_executor_settings, vision_executor_properties));
-  RETURN_IF_ERROR(handler->Initialize());
+  ABSL_RETURN_IF_ERROR(handler->Initialize());
   return handler;
 }
 
@@ -226,8 +227,9 @@ absl::Status VisionLiteRtCompiledModelExecutor::VisionEncoder::Initialize() {
     case Backend::CPU: {
       // TODO: b/403132820 - Add accelerator compilation options for XNNPACK.
       LITERT_ASSIGN_OR_RETURN(auto& cpu_options, options.GetCpuOptions());
-      RETURN_IF_ERROR(SetCpuOptions(vision_executor_settings_, cpu_options));
-      RETURN_IF_ERROR(SetCpuCacheOptions(
+      ABSL_RETURN_IF_ERROR(
+          SetCpuOptions(vision_executor_settings_, cpu_options));
+      ABSL_RETURN_IF_ERROR(SetCpuCacheOptions(
           weight_cache_file,
           /*logging_prefix=*/VisionExecutorSettings::kEncoderName,
           cpu_options));
@@ -237,12 +239,13 @@ absl::Status VisionLiteRtCompiledModelExecutor::VisionEncoder::Initialize() {
     case Backend::GPU: {
       // TODO: b/403132820 - Add accelerator compilation options for ML_DRIFT.
       LITERT_ASSIGN_OR_RETURN(auto& gpu_options, options.GetGpuOptions());
-      ASSIGN_OR_RETURN(
+      ABSL_ASSIGN_OR_RETURN(
           const auto cache_files,
           GetGpuModelCacheData(vision_executor_settings_,
                                VisionExecutorSettings::kEncoderName));
-      RETURN_IF_ERROR(SetGpuOptions(vision_executor_settings_, gpu_options));
-      RETURN_IF_ERROR(SetGpuCacheOptions(
+      ABSL_RETURN_IF_ERROR(
+          SetGpuOptions(vision_executor_settings_, gpu_options));
+      ABSL_RETURN_IF_ERROR(SetGpuCacheOptions(
           cache_files.weight_cache_file, cache_files.program_cache_file,
           cache_files.cache_key,
           /*logging_prefix=*/VisionExecutorSettings::kEncoderName,
@@ -291,7 +294,7 @@ VisionLiteRtCompiledModelExecutor::VisionAdapter::Create(
     const VisionExecutorProperties& vision_executor_properties) {
   auto handler = std::unique_ptr<VisionAdapter>(new VisionAdapter(
       env, model, vision_executor_settings, vision_executor_properties));
-  RETURN_IF_ERROR(handler->Initialize());
+  ABSL_RETURN_IF_ERROR(handler->Initialize());
   return handler;
 }
 
@@ -307,20 +310,21 @@ absl::Status VisionLiteRtCompiledModelExecutor::VisionAdapter::Initialize() {
     case Backend::CPU: {
       // TODO: b/403132820 - Add accelerator compilation options for XNNPACK.
       LITERT_ASSIGN_OR_RETURN(auto& cpu_options, options.GetCpuOptions());
-      RETURN_IF_ERROR(SetCpuOptions(vision_executor_settings_, cpu_options));
-      RETURN_IF_ERROR(SetCpuCacheOptions(weight_cache_file,
-                                         VisionExecutorSettings::kAdapterName,
-                                         cpu_options));
+      ABSL_RETURN_IF_ERROR(
+          SetCpuOptions(vision_executor_settings_, cpu_options));
+      ABSL_RETURN_IF_ERROR(SetCpuCacheOptions(
+          weight_cache_file, VisionExecutorSettings::kAdapterName,
+          cpu_options));
       options.SetHardwareAccelerators(litert::HwAccelerators::kCpu);
       break;
     }
     case Backend::GPU: {
       LITERT_ASSIGN_OR_RETURN(auto& gpu_options, options.GetGpuOptions());
-      ASSIGN_OR_RETURN(
+      ABSL_ASSIGN_OR_RETURN(
           const auto cache_files,
           GetGpuModelCacheData(vision_executor_settings_,
                                VisionExecutorSettings::kAdapterName));
-      RETURN_IF_ERROR(SetGpuCacheOptions(
+      ABSL_RETURN_IF_ERROR(SetGpuCacheOptions(
           cache_files.weight_cache_file, cache_files.program_cache_file,
           cache_files.cache_key,
           /*logging_prefix=*/VisionExecutorSettings::kAdapterName,
@@ -380,8 +384,9 @@ litert::lm::VisionLiteRtCompiledModelExecutor::Create(
                           BuildLiteRtCompiledModelResources(
                               vision_executor_settings.GetModelAssets()));
 
-  ASSIGN_OR_RETURN(auto vision_encoder_model,
-                   resources->GetTFLiteModel(ModelType::kTfLiteVisionEncoder));
+  ABSL_ASSIGN_OR_RETURN(
+      auto vision_encoder_model,
+      resources->GetTFLiteModel(ModelType::kTfLiteVisionEncoder));
   if (!vision_encoder_model) {
     return absl::InternalError("Failed to build LiteRt encoder model.");
   }
@@ -392,21 +397,21 @@ litert::lm::VisionLiteRtCompiledModelExecutor::Create(
       vision_adapter_model.status().code() != absl::StatusCode::kNotFound) {
     return vision_adapter_model.status();
   }
-  ASSIGN_OR_RETURN(
+  ABSL_ASSIGN_OR_RETURN(
       auto vision_executor_properties,
       GetVisionExecutorPropertiesFromModelResources(*resources.get()));
 
-  ASSIGN_OR_RETURN(
+  ABSL_ASSIGN_OR_RETURN(
       auto vision_encoder,
       VisionEncoder::Create(env, vision_encoder_model, vision_executor_settings,
                             vision_executor_properties));
 
   std::unique_ptr<VisionAdapter> vision_adapter;
   if (vision_adapter_model.ok()) {
-    ASSIGN_OR_RETURN(vision_adapter,
-                     VisionAdapter::Create(env, *vision_adapter_model,
-                                           vision_executor_settings,
-                                           vision_executor_properties));
+    ABSL_ASSIGN_OR_RETURN(vision_adapter,
+                          VisionAdapter::Create(env, *vision_adapter_model,
+                                                vision_executor_settings,
+                                                vision_executor_properties));
   }
 
   LITERT_ASSIGN_OR_RETURN(auto tensor_type,
@@ -507,16 +512,16 @@ absl::StatusOr<ExecutorVisionData> VisionLiteRtCompiledModelExecutor::Encode(
                           input_maps.at(kImages).TensorType());
   const auto& images_dimensions = images_tensor_type.Layout().Dimensions();
   const int num_patches_from_input = images_dimensions[1];
-  ASSIGN_OR_RETURN(auto encoder_signature_index,
-                   GetVitSignatureIndex(vision_encoder_->GetModel(),
-                                        vision_executor_properties_,
-                                        num_patches_from_input));
+  ABSL_ASSIGN_OR_RETURN(auto encoder_signature_index,
+                        GetVitSignatureIndex(vision_encoder_->GetModel(),
+                                             vision_executor_properties_,
+                                             num_patches_from_input));
   std::optional<int> adapter_signature_index;
   if (vision_adapter_ != nullptr) {
-    ASSIGN_OR_RETURN(adapter_signature_index,
-                     GetVitSignatureIndex(vision_adapter_->GetModel(),
-                                          vision_executor_properties_,
-                                          num_patches_from_input));
+    ABSL_ASSIGN_OR_RETURN(adapter_signature_index,
+                          GetVitSignatureIndex(vision_adapter_->GetModel(),
+                                               vision_executor_properties_,
+                                               num_patches_from_input));
   }
   LITERT_ASSIGN_OR_RETURN(
       auto encoder_input_buffers,

@@ -23,6 +23,7 @@
 
 #include "absl/base/nullability.h"  // from @com_google_absl
 #include "absl/status/status.h"  // from @com_google_absl
+#include "absl/status/status_macros.h"  // from @com_google_absl
 #include "absl/status/statusor.h"  // from @com_google_absl
 #include "absl/strings/str_cat.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
@@ -155,8 +156,7 @@ EndOfMultiModalEmbedding::Create(litert::Environment& env,
                                  int special_token) {
   auto handler = std::unique_ptr<EndOfMultiModalEmbedding>(
       new EndOfMultiModalEmbedding(env, model, special_token));
-  RETURN_IF_ERROR(  // IWYU pragma: keep as is included by status_macros.h
-      handler->Initialize());
+  ABSL_RETURN_IF_ERROR(handler->Initialize());
   return handler;
 }
 

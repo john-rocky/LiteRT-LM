@@ -29,6 +29,7 @@
 #include "absl/functional/any_invocable.h"  // from @com_google_absl
 #include "absl/memory/memory.h"  // from @com_google_absl
 #include "absl/status/status.h"  // from @com_google_absl
+#include "absl/status/status_macros.h"  // from @com_google_absl
 #include "absl/status/statusor.h"  // from @com_google_absl
 #include "absl/strings/str_join.h"  // from @com_google_absl
 #include "absl/strings/str_replace.h"  // from @com_google_absl
@@ -107,8 +108,8 @@ class ExtendedTokenizer : public Tokenizer {
  public:
   static absl::StatusOr<std::unique_ptr<ExtendedTokenizer>> CreateFromFile(
       absl::string_view model_path) {
-    ASSIGN_OR_RETURN(auto tokenizer,
-                     SentencePieceTokenizer::CreateFromFile(model_path));
+    ABSL_ASSIGN_OR_RETURN(auto tokenizer,
+                          SentencePieceTokenizer::CreateFromFile(model_path));
     return absl::WrapUnique(new ExtendedTokenizer(std::move(tokenizer)));
   }
 
@@ -128,7 +129,7 @@ class ExtendedTokenizer : public Tokenizer {
         auto extended_token_pos = text.find(extended_token_str);
         if (extended_token_pos != std::string::npos) {
           // The text before the extended token.
-          ASSIGN_OR_RETURN(
+          ABSL_ASSIGN_OR_RETURN(
               auto text_ids,
               tokenizer_->TextToTokenIds(text.substr(0, extended_token_pos)));
           token_ids.insert(token_ids.end(), text_ids.begin(), text_ids.end());
@@ -139,7 +140,7 @@ class ExtendedTokenizer : public Tokenizer {
       }
     } while (is_extended_token_found);
     if (!text.empty()) {
-      ASSIGN_OR_RETURN(auto text_ids, tokenizer_->TextToTokenIds(text));
+      ABSL_ASSIGN_OR_RETURN(auto text_ids, tokenizer_->TextToTokenIds(text));
       token_ids.insert(token_ids.end(), text_ids.begin(), text_ids.end());
     }
     return token_ids;
@@ -152,8 +153,8 @@ class ExtendedTokenizer : public Tokenizer {
     for (int token_id : token_ids) {
       if (id_to_extended_tokens_.contains(token_id)) {
         if (!current_standard_tokens.empty()) {
-          ASSIGN_OR_RETURN(auto std_text,
-                           tokenizer_->TokenIdsToText(current_standard_tokens));
+          ABSL_ASSIGN_OR_RETURN(auto std_text, tokenizer_->TokenIdsToText(
+                                                   current_standard_tokens));
           token_strs.push_back(std_text);
           current_standard_tokens.clear();
         }
@@ -163,8 +164,8 @@ class ExtendedTokenizer : public Tokenizer {
       }
     }
     if (!current_standard_tokens.empty()) {
-      ASSIGN_OR_RETURN(auto std_text,
-                       tokenizer_->TokenIdsToText(current_standard_tokens));
+      ABSL_ASSIGN_OR_RETURN(
+          auto std_text, tokenizer_->TokenIdsToText(current_standard_tokens));
       token_strs.push_back(std_text);
     }
     return absl::StrReplaceAll(absl::StrJoin(token_strs, ""), {{"▁", " "}});
@@ -219,7 +220,7 @@ class SessionAdvancedTest : public testing::Test {
     session_config.SetStartTokenId(2);
     session_config.SetSamplerBackend(Backend::CPU);
 
-    ASSIGN_OR_RETURN(
+    ABSL_ASSIGN_OR_RETURN(
         auto executor,
         CreateFakeLlmExecutor(
             // "Hello World!"
@@ -228,7 +229,7 @@ class SessionAdvancedTest : public testing::Test {
             /*decode_tokens=*/{
                 {224}, {24}, {8}, {66}, {246}, {18}, {2295}, {2294}}));
     fake_executor_ = executor.get();
-    ASSIGN_OR_RETURN(
+    ABSL_ASSIGN_OR_RETURN(
         execution_manager_,
         ThreadedExecutionManager::Create(
             tokenizer_.get(), model_resources_.get(), std::move(executor),
@@ -251,13 +252,13 @@ class SessionAdvancedTest : public testing::Test {
 absl::StatusOr<std::unique_ptr<AudioExecutorSettings>>
 CreateAudioExecutorSettings(const std::string& model_path,
                             int max_sequence_length, Backend backend) {
-  ASSIGN_OR_RETURN(auto model_file, ScopedFile::Open(model_path));
+  ABSL_ASSIGN_OR_RETURN(auto model_file, ScopedFile::Open(model_path));
   auto model_file_ptr = std::make_shared<ScopedFile>(std::move(model_file));
-  ASSIGN_OR_RETURN(auto model_assets, ModelAssets::Create(model_file_ptr));
+  ABSL_ASSIGN_OR_RETURN(auto model_assets, ModelAssets::Create(model_file_ptr));
   // Create the audio executor settings.
-  ASSIGN_OR_RETURN(auto audio_executor_settings,
-                   AudioExecutorSettings::CreateDefault(
-                       model_assets, max_sequence_length, backend));
+  ABSL_ASSIGN_OR_RETURN(auto audio_executor_settings,
+                        AudioExecutorSettings::CreateDefault(
+                            model_assets, max_sequence_length, backend));
   return std::make_unique<AudioExecutorSettings>(
       std::move(audio_executor_settings));
 }

@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "absl/status/status.h"  // from @com_google_absl
+#include "absl/status/status_macros.h"  // from @com_google_absl
 #include "absl/status/statusor.h"  // from @com_google_absl
 #include "absl/strings/str_cat.h"  // from @com_google_absl
 #include "absl/strings/string_view.h"  // from @com_google_absl
@@ -165,7 +166,7 @@ absl::StatusOr<std::unique_ptr<EmbeddingLookupMultiModal>>
 EmbeddingLookupMultiModal::Create(
     const ::litert::TensorBuffer* embedding_buffer, int special_token) {
   auto handler = std::make_unique<EmbeddingLookupMultiModal>();
-  RETURN_IF_ERROR(handler->Initialize(embedding_buffer, special_token));
+  ABSL_RETURN_IF_ERROR(handler->Initialize(embedding_buffer, special_token));
   return handler;
 }
 

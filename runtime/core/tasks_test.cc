@@ -27,6 +27,7 @@
 #include <gtest/gtest.h>
 #include "absl/functional/any_invocable.h"  // from @com_google_absl
 #include "absl/status/status.h"  // from @com_google_absl
+#include "absl/status/status_macros.h"  // from @com_google_absl
 #include "absl/status/statusor.h"  // from @com_google_absl
 #include "absl/strings/string_view.h"  // from @com_google_absl
 #include "absl/time/clock.h"  // from @com_google_absl
@@ -962,7 +963,7 @@ class TasksCustomSamplingTest : public testing::Test {
     StopTokenDetector stop_token_detector(batch_size);
     auto status =
         stop_token_detector.AddStopTokenSequence(/*stop_sequence=*/{0});
-    RETURN_IF_ERROR(status);
+    ABSL_RETURN_IF_ERROR(status);
     auto executor = CreateFakeLlmExecutor(prefill_tokens, decode_tokens,
                                           vocab_size, batch_size);
 
@@ -970,8 +971,9 @@ class TasksCustomSamplingTest : public testing::Test {
 
     // Run prefill with <bos> token.
     std::vector<int> prefill_token_ids = {2};
-    ASSIGN_OR_RETURN(auto token_ids_buffer,
-                     tokenizer_->TokenIdsToTensorBuffer(prefill_token_ids));
+    ABSL_ASSIGN_OR_RETURN(
+        auto token_ids_buffer,
+        tokenizer_->TokenIdsToTensorBuffer(prefill_token_ids));
     ExecutorTextData text_data(std::move(token_ids_buffer));
     ExecutorInputs inputs(std::move(text_data), std::nullopt, std::nullopt);
     auto prefill_responses = Tasks::Prefill(

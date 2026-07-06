@@ -22,6 +22,7 @@
 
 #include "absl/log/absl_log.h"  // from @com_google_absl
 #include "absl/status/status.h"  // from @com_google_absl
+#include "absl/status/status_macros.h"  // from @com_google_absl
 #include "absl/status/statusor.h"  // from @com_google_absl
 #include "absl/strings/str_cat.h"  // from @com_google_absl
 #include "absl/strings/string_view.h"  // from @com_google_absl
@@ -145,8 +146,8 @@ absl::StatusOr<litert::Options> CreateCompilationOptions(
           gpu_compilation_options));
 
       // Use NoExternalTensorsMode to get better performance.
-      ASSIGN_OR_RETURN(const GpuConfig gpu_config,
-                       executor_settings.GetBackendConfig<GpuConfig>());
+      ABSL_ASSIGN_OR_RETURN(const GpuConfig gpu_config,
+                            executor_settings.GetBackendConfig<GpuConfig>());
       bool external_tensor_mode = gpu_config.external_tensor_mode;
       gpu_compilation_options.EnableExternalTensorsMode(external_tensor_mode);
       if (!external_tensor_mode) {
@@ -160,8 +161,8 @@ absl::StatusOr<litert::Options> CreateCompilationOptions(
           gpu_compilation_options.AddExternalTensorPattern("param_tensor");
           gpu_compilation_options.AddBufferStorageTensorPattern("param_tensor");
         }
-        ASSIGN_OR_RETURN(auto sampler_backend,
-                         GetSamplerBackend(executor_settings));
+        ABSL_ASSIGN_OR_RETURN(auto sampler_backend,
+                              GetSamplerBackend(executor_settings));
         if (sampler_backend == Backend::GPU) {
           // GPU Sampler requires logits to be external tensors (PHWC4 format).
           gpu_compilation_options.AddExternalTensorPattern("logits");
@@ -226,8 +227,8 @@ absl::StatusOr<litert::Options> CreateCompilationOptions(
     case Backend::CPU: {
       LITERT_ASSIGN_OR_RETURN(auto& cpu_compilation_options,
                               compilation_options.GetCpuOptions());
-      ASSIGN_OR_RETURN(const CpuConfig cpu_config,
-                       executor_settings.GetBackendConfig<CpuConfig>());
+      ABSL_ASSIGN_OR_RETURN(const CpuConfig cpu_config,
+                            executor_settings.GetBackendConfig<CpuConfig>());
       const uint32_t num_threads = cpu_config.number_of_threads;
       cpu_compilation_options.SetNumThreads(num_threads);
       auto weight_cache_file = executor_settings.GetWeightCacheFile(
@@ -241,8 +242,9 @@ absl::StatusOr<litert::Options> CreateCompilationOptions(
         } else {
           auto scoped_cache_file =
               std::get<std::shared_ptr<ScopedFile>>(*weight_cache_file);
-          ASSIGN_OR_RETURN(auto duplicated, scoped_cache_file->Duplicate());
-          ASSIGN_OR_RETURN(int fd, duplicated.Release());
+          ABSL_ASSIGN_OR_RETURN(auto duplicated,
+                                scoped_cache_file->Duplicate());
+          ABSL_ASSIGN_OR_RETURN(int fd, duplicated.Release());
           cpu_compilation_options.SetXNNPackWeightCacheFileDescriptor(fd);
         }
       } else {

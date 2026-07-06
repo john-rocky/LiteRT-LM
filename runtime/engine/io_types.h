@@ -25,6 +25,7 @@
 
 #include "absl/base/nullability.h"  // from @com_google_absl
 #include "absl/status/status.h"  // from @com_google_absl
+#include "absl/status/status_macros.h"  // from @com_google_absl
 #include "absl/status/statusor.h"  // from @com_google_absl
 #include "absl/strings/string_view.h"  // from @com_google_absl
 #include "absl/time/time.h"  // from @com_google_absl
@@ -250,9 +251,9 @@ class BenchmarkInfo {
   absl::Status TimeTextToTokenIdsEnd(uint64_t num_tokens);
   // Time the duration between two consecutive marks. Useful for profiling the
   // pipeline at a specific point. For example:
-  //   RETURN_IF_ERROR(benchmark_info.TimeMarkDelta("sampling"));
+  //   ABSL_RETURN_IF_ERROR(benchmark_info.TimeMarkDelta("sampling"));
   //   ... actual sampling logics ...
-  //   RETURN_IF_ERROR(benchmark_info.TimeMarkDelta("sampling"));
+  //   ABSL_RETURN_IF_ERROR(benchmark_info.TimeMarkDelta("sampling"));
   //
   // The method will return the duration as the time delta between the two
   // TimeMarkDelta("sampling") calls. The duration will be stored / recorded for

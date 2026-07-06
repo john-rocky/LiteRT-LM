@@ -25,6 +25,7 @@
 #include "absl/base/nullability.h"  // from @com_google_absl
 #include "absl/log/absl_log.h"  // from @com_google_absl
 #include "absl/status/status.h"  // from @com_google_absl
+#include "absl/status/status_macros.h"  // from @com_google_absl
 #include "absl/status/statusor.h"  // from @com_google_absl
 #include "absl/strings/match.h"  // from @com_google_absl
 #include "absl/strings/str_cat.h"  // from @com_google_absl
@@ -123,7 +124,7 @@ absl::Status MaybeOverrideActivationType(
     return absl::OkStatus();
   }
   if (prefer_activation_type.has_value()) {
-    ASSIGN_OR_RETURN(
+    ABSL_ASSIGN_OR_RETURN(
         ActivationDataType activation_data_type,
         GetActivationDataTypeFromString(prefer_activation_type.value()));
     executor_settings.SetActivationDataType(activation_data_type);
@@ -194,12 +195,12 @@ absl::StatusOr<EngineSettings> EngineSettings::CreateDefault(
     }
   }
 
-  ASSIGN_OR_RETURN(  // NOLINT
+  ABSL_ASSIGN_OR_RETURN(  // NOLINT
       auto executor_settings, LlmExecutorSettings::CreateDefault(
                                   model_assets, backend, sampler_backend));
   std::optional<VisionExecutorSettings> vision_executor_settings;
   if (vision_backend.has_value()) {
-    ASSIGN_OR_RETURN(
+    ABSL_ASSIGN_OR_RETURN(
         vision_executor_settings,
         VisionExecutorSettings::CreateDefault(
             model_assets, /*encoder_backend=*/vision_backend.value(),
@@ -208,10 +209,10 @@ absl::StatusOr<EngineSettings> EngineSettings::CreateDefault(
   }
   std::optional<AudioExecutorSettings> audio_executor_settings;
   if (audio_backend.has_value()) {
-    ASSIGN_OR_RETURN(audio_executor_settings,
-                     AudioExecutorSettings::CreateDefault(
-                         model_assets, executor_settings.GetMaxNumTokens(),
-                         audio_backend.value()));
+    ABSL_ASSIGN_OR_RETURN(audio_executor_settings,
+                          AudioExecutorSettings::CreateDefault(
+                              model_assets, executor_settings.GetMaxNumTokens(),
+                              audio_backend.value()));
   }
   return EngineSettings(std::move(executor_settings),
                         std::move(vision_executor_settings),
@@ -354,8 +355,8 @@ absl::Status EngineSettings::MaybeUpdateAndValidate(
 
   if (!metadata.has_llm_model_type()) {
     if (tokenizer != nullptr) {
-      ASSIGN_OR_RETURN(*metadata.mutable_llm_model_type(),
-                       InferLlmModelType(metadata, tokenizer));
+      ABSL_ASSIGN_OR_RETURN(*metadata.mutable_llm_model_type(),
+                            InferLlmModelType(metadata, tokenizer));
     } else {
       return absl::InvalidArgumentError(
           "Tokenizer is null and LLM model type is not set.");
@@ -409,29 +410,30 @@ absl::Status EngineSettings::MaybeUpdateAndValidate(
     main_executor_settings_.SetAdvancedSettings(advanced_settings);
   }
   if (!metadata.has_jinja_prompt_template()) {
-    ASSIGN_OR_RETURN(*metadata.mutable_jinja_prompt_template(),
-                     GetDefaultJinjaPromptTemplate(metadata.prompt_templates(),
-                                                   metadata.llm_model_type()));
+    ABSL_ASSIGN_OR_RETURN(
+        *metadata.mutable_jinja_prompt_template(),
+        GetDefaultJinjaPromptTemplate(metadata.prompt_templates(),
+                                      metadata.llm_model_type()));
   }
 
   // If the executor settings is set, then check if the input backend
   // constraint is compatible with the executor settings.
-  RETURN_IF_ERROR(ValidateBackendConstraint(main_executor_settings_,
-                                            text_backend_constraint, "Main"));
-  RETURN_IF_ERROR(MaybeOverrideActivationType(main_executor_settings_,
-                                              text_prefer_activation_type));
+  ABSL_RETURN_IF_ERROR(ValidateBackendConstraint(
+      main_executor_settings_, text_backend_constraint, "Main"));
+  ABSL_RETURN_IF_ERROR(MaybeOverrideActivationType(
+      main_executor_settings_, text_prefer_activation_type));
 
   if (vision_executor_settings_.has_value()) {
-    RETURN_IF_ERROR(ValidateBackendConstraint(vision_executor_settings_.value(),
-                                              vision_backend_constraint,
-                                              "Vision"));
-    RETURN_IF_ERROR(MaybeOverrideActivationType(
+    ABSL_RETURN_IF_ERROR(
+        ValidateBackendConstraint(vision_executor_settings_.value(),
+                                  vision_backend_constraint, "Vision"));
+    ABSL_RETURN_IF_ERROR(MaybeOverrideActivationType(
         vision_executor_settings_.value(), vision_prefer_activation_type));
   }
   if (audio_executor_settings_.has_value()) {
-    RETURN_IF_ERROR(ValidateBackendConstraint(
+    ABSL_RETURN_IF_ERROR(ValidateBackendConstraint(
         audio_executor_settings_.value(), audio_backend_constraint, "Audio"));
-    RETURN_IF_ERROR(MaybeOverrideActivationType(
+    ABSL_RETURN_IF_ERROR(MaybeOverrideActivationType(
         audio_executor_settings_.value(), audio_prefer_activation_type));
   }
 
@@ -603,7 +605,7 @@ absl::Status SessionConfig::MaybeUpdateAndValidate(
       // If the sampler backend is still unspecified, then it will be set later
       // based on the main executor settings.
       if (backend_to_use != proto::SamplerParameters::UNSPECIFIED) {
-        ASSIGN_OR_RETURN(
+        ABSL_ASSIGN_OR_RETURN(
             sampler_backend_,
             GetBackendFromString(
                 proto::SamplerParameters::Backend_Name(backend_to_use)));

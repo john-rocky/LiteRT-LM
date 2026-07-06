@@ -230,7 +230,7 @@ absl::Status EmbeddingLookupText::LookupPrefill(absl::Span<const int> tokens,
   for (int token : tokens) {
     absl::Span<uint8_t> output_buffer(
         reinterpret_cast<uint8_t*>(prefill_output_ptr), bytes_per_token);
-    RETURN_IF_ERROR(LookupInternal(token, output_buffer));
+    ABSL_RETURN_IF_ERROR(LookupInternal(token, output_buffer));
     prefill_output_ptr += bytes_per_token;
   }
 
@@ -256,7 +256,7 @@ EmbeddingLookupText::Create(
   auto handler = std::unique_ptr<EmbeddingLookupText>(new EmbeddingLookupText(
       env, model, std::move(signature_key), std::move(external_weight_file),
       std::move(external_weight_sections)));
-  RETURN_IF_ERROR(handler->Initialize());
+  ABSL_RETURN_IF_ERROR(handler->Initialize());
   return handler;
 }
 
@@ -357,7 +357,7 @@ absl::Status EmbeddingLookupText::Initialize() {
 
   // Initialize the default embedding vector to be the embedding of token 0.
   default_embedding_vector_.resize(floats_per_token_output_);
-  RETURN_IF_ERROR(LookupInternal(
+  ABSL_RETURN_IF_ERROR(LookupInternal(
       0, absl::MakeSpan(
              reinterpret_cast<uint8_t*>(default_embedding_vector_.data()),
              floats_per_token_output_ * sizeof(float))));

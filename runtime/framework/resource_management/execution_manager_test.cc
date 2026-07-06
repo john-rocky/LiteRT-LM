@@ -25,6 +25,7 @@
 #include <gtest/gtest.h>
 #include "absl/functional/any_invocable.h"  // from @com_google_absl
 #include "absl/status/status.h"  // from @com_google_absl
+#include "absl/status/status_macros.h"  // from @com_google_absl
 #include "absl/status/statusor.h"  // from @com_google_absl
 #include "absl/strings/str_cat.h"  // from @com_google_absl
 #include "absl/strings/string_view.h"  // from @com_google_absl
@@ -105,10 +106,10 @@ class ExecutionManagerTest
 
   absl::StatusOr<SessionConfig> CreateDefaultSessionConfig(
       bool use_external_sampler = false) {
-    ASSIGN_OR_RETURN(auto model_assets,
-                     ModelAssets::Create("test_model_path_1"));
-    ASSIGN_OR_RETURN(auto settings,
-                     EngineSettings::CreateDefault(model_assets));
+    ABSL_ASSIGN_OR_RETURN(auto model_assets,
+                          ModelAssets::Create("test_model_path_1"));
+    ABSL_ASSIGN_OR_RETURN(auto settings,
+                          EngineSettings::CreateDefault(model_assets));
 
     proto::LlmMetadata llm_metadata;
     llm_metadata.mutable_stop_tokens()

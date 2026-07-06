@@ -35,6 +35,7 @@
 #include "absl/log/absl_log.h"  // from @com_google_absl
 #include "absl/log/globals.h"  // from @com_google_absl
 #include "absl/status/status.h"  // from @com_google_absl
+#include "absl/status/status_macros.h"  // from @com_google_absl
 #include "absl/status/statusor.h"  // from @com_google_absl
 #include "absl/strings/string_view.h"  // from @com_google_absl
 #include "absl/time/time.h"  // from @com_google_absl
@@ -120,12 +121,12 @@ absl::Status MainHelper(int argc, char** argv) {
   if (model_path.empty()) {
     return absl::InvalidArgumentError("Model path is empty.");
   }
-  ASSIGN_OR_RETURN(ModelAssets model_assets,  // NOLINT
-                   ModelAssets::Create(model_path));
+  ABSL_ASSIGN_OR_RETURN(ModelAssets model_assets,  // NOLINT
+                        ModelAssets::Create(model_path));
   auto backend_str = absl::GetFlag(FLAGS_backend);
-  ASSIGN_OR_RETURN(Backend backend,
-                   litert::lm::GetBackendFromString(backend_str));
-  ASSIGN_OR_RETURN(
+  ABSL_ASSIGN_OR_RETURN(Backend backend,
+                        litert::lm::GetBackendFromString(backend_str));
+  ABSL_ASSIGN_OR_RETURN(
       EngineSettings engine_settings,
       EngineSettings::CreateDefault(std::move(model_assets), backend));
   // Enable benchmark by default.
@@ -133,18 +134,18 @@ absl::Status MainHelper(int argc, char** argv) {
       litert::lm::proto::BenchmarkParams();
 
   // Create the engine.
-  ASSIGN_OR_RETURN(auto engine, litert::lm::EngineFactory::CreateDefault(
-                                    std::move(engine_settings)));
+  ABSL_ASSIGN_OR_RETURN(auto engine, litert::lm::EngineFactory::CreateDefault(
+                                         std::move(engine_settings)));
 
   // Create the conversation.
   std::unique_ptr<Conversation> conversation;
   auto session_config = litert::lm::SessionConfig::CreateDefault();
-  ASSIGN_OR_RETURN(auto conversation_config,
-                   ConversationConfig::Builder()
-                       .SetSessionConfig(session_config)
-                       .Build(*engine));
-  ASSIGN_OR_RETURN(conversation,
-                   Conversation::Create(*engine, conversation_config));
+  ABSL_ASSIGN_OR_RETURN(auto conversation_config,
+                        ConversationConfig::Builder()
+                            .SetSessionConfig(session_config)
+                            .Build(*engine));
+  ABSL_ASSIGN_OR_RETURN(conversation,
+                        Conversation::Create(*engine, conversation_config));
 
   // Prepare the message to send.
   json content_list = json::array();
@@ -154,10 +155,10 @@ absl::Status MainHelper(int argc, char** argv) {
 
   // Send the message and wait for the response, asynchronously log the
   // response.
-  RETURN_IF_ERROR(conversation->SendMessageAsync(
+  ABSL_RETURN_IF_ERROR(conversation->SendMessageAsync(
       json::object({{"role", "user"}, {"content", content_list}}),
       CreateMessageCallback()));
-  RETURN_IF_ERROR(engine->WaitUntilDone(absl::Minutes(10)));
+  ABSL_RETURN_IF_ERROR(engine->WaitUntilDone(absl::Minutes(10)));
 
   // Print the benchmark info.
   auto benchmark_info = conversation->GetBenchmarkInfo();

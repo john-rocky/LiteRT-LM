@@ -35,6 +35,7 @@
 #include "absl/flags/parse.h"  // from @com_google_absl
 #include "absl/log/absl_log.h"  // from @com_google_absl
 #include "absl/status/status.h"  // from @com_google_absl
+#include "absl/status/status_macros.h"  // from @com_google_absl
 #include "absl/status/statusor.h"  // from @com_google_absl
 #include "absl/strings/numbers.h"  // from @com_google_absl
 #include "absl/strings/str_cat.h"  // from @com_google_absl
@@ -159,7 +160,7 @@ absl::Status WriteMetricsToFile(
     return absl::InvalidArgumentError("No metrics to write.");
   }
 
-  ASSIGN_OR_RETURN(auto proto_list, litert::lm::ToProtoList(metrics));
+  ABSL_ASSIGN_OR_RETURN(auto proto_list, litert::lm::ToProtoList(metrics));
 
   std::ofstream out(file_path, std::ios::out | std::ios::binary);
   if (!out) {
@@ -252,7 +253,7 @@ absl::Status MainHelper(int argc, char** argv) {
   settings.max_num_tokens = absl::GetFlag(FLAGS_max_num_tokens);
   settings.max_output_tokens = absl::GetFlag(FLAGS_max_output_tokens);
   settings.max_num_images = absl::GetFlag(FLAGS_max_num_images);
-  ASSIGN_OR_RETURN(
+  ABSL_ASSIGN_OR_RETURN(
       settings.prefill_batch_sizes,
       ParsePrefillBatchSizes(absl::GetFlag(FLAGS_prefill_batch_sizes)));
   settings.prefill_chunk_size = absl::GetFlag(FLAGS_prefill_chunk_size);
@@ -339,11 +340,11 @@ absl::Status MainHelper(int argc, char** argv) {
   const bool collect_metrics =
       (settings.benchmark && !metric_proto_file_path.empty());
 
-  RETURN_IF_ERROR(
+  ABSL_RETURN_IF_ERROR(
       litert::lm::RunLiteRtLm(settings, collect_metrics ? &metrics : nullptr));
 
   if (collect_metrics) {
-    RETURN_IF_ERROR(WriteMetricsToFile(metrics, metric_proto_file_path));
+    ABSL_RETURN_IF_ERROR(WriteMetricsToFile(metrics, metric_proto_file_path));
   }
 
   return absl::OkStatus();

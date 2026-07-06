@@ -24,6 +24,7 @@
 
 #include "absl/base/nullability.h"  // from @com_google_absl
 #include "absl/status/status.h"  // from @com_google_absl
+#include "absl/status/status_macros.h"  // from @com_google_absl
 #include "absl/status/statusor.h"  // from @com_google_absl
 #include "absl/strings/string_view.h"  // from @com_google_absl
 #include "support/tokenizer/tokenizer.h"  // from @litert
@@ -63,12 +64,12 @@ namespace litert::lm {
 //
 // Example:
 //
-//   ASSIGN_OR_RETURN(ModelAssets model_assets,
+//   ABSL_ASSIGN_OR_RETURN(ModelAssets model_assets,
 //                    ModelAssets::Create(model_path));
-//   ASSIGN_OR_RETURN(EngineSettings engine_settings,
+//   ABSL_ASSIGN_OR_RETURN(EngineSettings engine_settings,
 //                    EngineSettings::CreateDefault(model_assets));
 //    ...initialize the Engine...
-//   ASSIGN_OR_RETURN(std::unique_ptr<Engine> engine,
+//   ABSL_ASSIGN_OR_RETURN(std::unique_ptr<Engine> engine,
 //                    Engine::CreateEngine(engine_settings));
 // TODO(b/397975034) Add overloading << operator for debugging.
 class EngineSettings {
