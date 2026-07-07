@@ -316,7 +316,7 @@ class DecodeConfig {
   }
 
   // Returns the repetition penalty config.
-  RepetitionPenaltyConfig GetRepetitionPenaltyConfig() const {
+  const RepetitionPenaltyConfig& GetRepetitionPenaltyConfig() const {
     return repetition_penalty_config_;
   }
 
@@ -328,7 +328,7 @@ class DecodeConfig {
   }
 
   // Returns the suppress tokens config.
-  SuppressTokensConfig GetSuppressTokensConfig() const {
+  const std::optional<SuppressTokensConfig>& GetSuppressTokensConfig() const {
     return suppress_tokens_config_;
   }
 
@@ -385,8 +385,10 @@ class DecodeConfig {
 
   RepetitionPenaltyConfig repetition_penalty_config_ =
       RepetitionPenaltyConfig::Default();
-  SuppressTokensConfig suppress_tokens_config_ =
-      SuppressTokensConfig::Default();
+  // If set, the suppress tokens config will be used to suppress specific tokens
+  // during decoding. If not set, the suppress tokens config will be loaded from
+  // the model assets.
+  std::optional<SuppressTokensConfig> suppress_tokens_config_ = std::nullopt;
   Constraint* absl_nullable constraint_ = nullptr;
   std::optional<int> max_output_tokens_ = std::nullopt;
   std::optional<int> thinking_token_budget_ = std::nullopt;

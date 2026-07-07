@@ -183,6 +183,7 @@ cc_library(
         ":logits_processor",
         ":suppress_tokens_config",
         "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:span",
         "//runtime/util:convert_tensor_buffer",
         "@litert//tflite/types:half",

@@ -63,16 +63,12 @@ using ::testing::AllOf;
 using ::testing::ElementsAre;
 using ::testing::HasSubstr;
 using ::testing::Not;
+using ::testing::Optional;
 using ::testing::Return;
 using ::testing::VariantWith;
 
 absl::string_view kTestLlmPath =
     "litert_lm/runtime/testdata/test_lm.litertlm";
-
-// This is the same as kTestLlmPath, but with suppress tokens {1234, 5678}.
-// This is used to test the suppress tokens functionality.
-absl::string_view kTestLlmSuppressTokensPath =
-    "litert_lm/runtime/testdata/test_lm_suppress_tokens.litertlm";
 
 constexpr char kTestTokenizerPath[] =
     "litert_lm/runtime/components/testdata/gemma3_sentencepiece.model";
@@ -377,52 +373,6 @@ TEST(ConversationConfigTest, OverwritePromptTemplate) {
 
   EXPECT_EQ(config.GetPromptTemplate().GetTemplateSource(),
             "overwrite template");
-}
-
-TEST(ConversationConfigTest, SuppressTokensFromMetadata) {
-  // The test LLM metadata has suppress_tokens {1234, 5678}.
-  ASSERT_OK_AND_ASSIGN(
-      auto model_assets,
-      ModelAssets::Create(GetTestdataPath(kTestLlmSuppressTokensPath)));
-  ASSERT_OK_AND_ASSIGN(auto engine_settings, EngineSettings::CreateDefault(
-                                                 model_assets, Backend::CPU));
-  engine_settings.GetMutableMainExecutorSettings().SetCacheDir(":nocache");
-  engine_settings.GetMutableMainExecutorSettings().SetMaxNumTokens(10);
-
-  ASSERT_OK_AND_ASSIGN(auto engine,
-                       EngineFactory::CreateDefault(engine_settings));
-
-  ASSERT_OK_AND_ASSIGN(auto config, ConversationConfig::CreateDefault(*engine));
-
-  // The suppress tokens are {1234, 5678} from the metadata.
-  absl::flat_hash_set<int> expected_tokens = {1234, 5678};
-  EXPECT_EQ(config.suppress_tokens_config().suppress_tokens(), expected_tokens);
-}
-
-TEST(ConversationConfigTest, SuppressTokensFromBuilder) {
-  // The test LLM metadata has suppress_tokens {1234, 5678}.
-  ASSERT_OK_AND_ASSIGN(
-      auto model_assets,
-      ModelAssets::Create(GetTestdataPath(kTestLlmSuppressTokensPath)));
-  ASSERT_OK_AND_ASSIGN(auto engine_settings, EngineSettings::CreateDefault(
-                                                 model_assets, Backend::CPU));
-  engine_settings.GetMutableMainExecutorSettings().SetCacheDir(":nocache");
-  engine_settings.GetMutableMainExecutorSettings().SetMaxNumTokens(10);
-
-  ASSERT_OK_AND_ASSIGN(auto engine,
-                       EngineFactory::CreateDefault(engine_settings));
-
-  absl::flat_hash_set<int> suppress_tokens = {5678, 9012};
-  ASSERT_OK_AND_ASSIGN(
-      auto config,
-      ConversationConfig::Builder()
-          .SetSuppressTokensConfig(SuppressTokensConfig(suppress_tokens))
-          .Build(*engine));
-
-  // The suppress tokens are {5678, 9012} from the builder, which should be used
-  // instead of the suppress tokens from the metadata.
-  absl::flat_hash_set<int> expected_tokens = {5678, 9012};
-  EXPECT_EQ(config.suppress_tokens_config().suppress_tokens(), expected_tokens);
 }
 
 struct ConversationTestParams {
@@ -3061,6 +3011,122 @@ class MockConstraint : public Constraint {
               (const State& state), (const, override));
 };
 
+TEST_P(ConversationTest, SendMessageWithRepetitionPenalty) {
+  // Set up mock Session.
+  auto mock_session = CreateMockSession();
+  MockSession* mock_session_ptr = mock_session.get();
+  auto mock_engine = CreateMockEngine(std::move(mock_session));
+
+  RepetitionPenaltyConfig repetition_penalty_config(
+      /*repetition_penalty=*/1.2f, /*presence_penalty=*/0.5f,
+      /*frequency_penalty=*/0.2f, /*window_size=*/10);
+
+  ASSERT_OK_AND_ASSIGN(
+      auto conversation_config,
+      ConversationConfig::Builder()
+          .SetSessionConfig(session_config_)
+          .SetOverwritePromptTemplate(PromptTemplate(kTestJinjaPromptTemplate))
+          .Build(*mock_engine));
+  ASSERT_OK_AND_ASSIGN(auto conversation,
+                       Conversation::Create(*mock_engine, conversation_config));
+
+  // Send a message.
+  Message user_message = {{"role", "user"}, {"content", "How are you?"}};
+
+  EXPECT_CALL(*mock_session_ptr, RunPrefillAsync(testing::_, testing::_))
+      .WillOnce([](const std::vector<InputData>& contents,
+                   absl::AnyInvocable<void(absl::StatusOr<Responses>)>
+                       user_callback) {
+        user_callback(Responses(TaskState::kDone));
+        return nullptr;
+      });
+
+  // Verify that the repetition penalty config is passed to RunDecode.
+  EXPECT_CALL(
+      *mock_session_ptr,
+      RunDecodeAsync(
+          testing::_,
+          testing::Property(
+              &DecodeConfig::GetRepetitionPenaltyConfig,
+              testing::AllOf(
+                  testing::Property(
+                      &RepetitionPenaltyConfig::repetition_penalty, 1.2f),
+                  testing::Property(&RepetitionPenaltyConfig::presence_penalty,
+                                    0.5f),
+                  testing::Property(&RepetitionPenaltyConfig::frequency_penalty,
+                                    0.2f),
+                  testing::Property(&RepetitionPenaltyConfig::window_size,
+                                    10)))))
+      .WillOnce(
+          [](absl::AnyInvocable<void(absl::StatusOr<Responses>)> user_callback,
+             const DecodeConfig& decode_config) {
+            user_callback(Responses(TaskState::kProcessing, {"I am good."}));
+            user_callback(Responses(TaskState::kDone));
+            return nullptr;
+          });
+
+  // Send a message with the repetition penalty config.
+  ASSERT_OK_AND_ASSIGN(
+      const Message response,
+      conversation->SendMessage(user_message, {.repetition_penalty_config =
+                                                   repetition_penalty_config}));
+}
+
+TEST_P(ConversationTest, SendMessageWithSuppressTokens) {
+  // Set up mock Session.
+  auto mock_session = CreateMockSession();
+  MockSession* mock_session_ptr = mock_session.get();
+  auto mock_engine = CreateMockEngine(std::move(mock_session));
+
+  SuppressTokensConfig suppress_tokens_config(/*suppress_tokens=*/{
+      5678,
+      9012,
+  });
+
+  ASSERT_OK_AND_ASSIGN(
+      auto conversation_config,
+      ConversationConfig::Builder()
+          .SetSessionConfig(session_config_)
+          .SetOverwritePromptTemplate(PromptTemplate(kTestJinjaPromptTemplate))
+          .Build(*mock_engine));
+  ASSERT_OK_AND_ASSIGN(auto conversation,
+                       Conversation::Create(*mock_engine, conversation_config));
+
+  // Send a message.
+  Message user_message = {{"role", "user"}, {"content", "How are you?"}};
+
+  EXPECT_CALL(*mock_session_ptr, RunPrefillAsync(testing::_, testing::_))
+      .WillOnce([](const std::vector<InputData>& contents,
+                   absl::AnyInvocable<void(absl::StatusOr<Responses>)>
+                       user_callback) {
+        user_callback(Responses(TaskState::kDone));
+        return nullptr;
+      });
+
+  // Verify that the suppress tokens config is passed to RunDecode.
+  EXPECT_CALL(
+      *mock_session_ptr,
+      RunDecodeAsync(
+          testing::_,
+          testing::Property(&DecodeConfig::GetSuppressTokensConfig,
+                            Optional(testing::Property(
+                                &SuppressTokensConfig::suppress_tokens,
+                                testing::UnorderedElementsAre(5678, 9012))))))
+      .WillOnce(
+          [](absl::AnyInvocable<void(absl::StatusOr<Responses>)> user_callback,
+             const DecodeConfig& decode_config) {
+            user_callback(Responses(TaskState::kProcessing, {"I am good."}));
+            user_callback(Responses(TaskState::kDone));
+            return nullptr;
+          });
+
+  // Send a message with the suppress tokens config.
+  ASSERT_OK_AND_ASSIGN(
+      const Message response,
+      conversation->SendMessage(
+          user_message, {.suppress_tokens_config = suppress_tokens_config}));
+}
+
 TEST_P(ConversationTest, SendMessageWithConstraint) {
   // Set up mock Session.
   auto mock_session = CreateMockSession();
@@ -3114,120 +3180,6 @@ TEST_P(ConversationTest, SendMessageWithConstraint) {
           user_message, {
                             .decoding_constraint = std::move(constraint_arg),
                         }));
-}
-
-TEST_P(ConversationTest, SendMessageWithRepetitionPenalty) {
-  // Set up mock Session.
-  auto mock_session = CreateMockSession();
-  MockSession* mock_session_ptr = mock_session.get();
-  auto mock_engine = CreateMockEngine(std::move(mock_session));
-
-  RepetitionPenaltyConfig repetition_penalty_config(
-      /*repetition_penalty=*/1.2f, /*presence_penalty=*/0.5f,
-      /*frequency_penalty=*/0.2f, /*window_size=*/10);
-
-  // Create Conversation with RepetitionPenaltyConfig.
-  ASSERT_OK_AND_ASSIGN(
-      auto conversation_config,
-      ConversationConfig::Builder()
-          .SetSessionConfig(session_config_)
-          .SetOverwritePromptTemplate(PromptTemplate(kTestJinjaPromptTemplate))
-          .SetRepetitionPenaltyConfig(repetition_penalty_config)
-          .Build(*mock_engine));
-  ASSERT_OK_AND_ASSIGN(auto conversation,
-                       Conversation::Create(*mock_engine, conversation_config));
-
-  // Send a message.
-  Message user_message = {{"role", "user"}, {"content", "How are you?"}};
-
-  EXPECT_CALL(*mock_session_ptr, RunPrefillAsync(testing::_, testing::_))
-      .WillOnce([](const std::vector<InputData>& contents,
-                   absl::AnyInvocable<void(absl::StatusOr<Responses>)>
-                       user_callback) {
-        user_callback(Responses(TaskState::kDone));
-        return nullptr;
-      });
-
-  // Verify that the repetition penalty config is passed to RunDecode.
-  EXPECT_CALL(
-      *mock_session_ptr,
-      RunDecodeAsync(
-          testing::_,
-          testing::Property(
-              &DecodeConfig::GetRepetitionPenaltyConfig,
-              testing::AllOf(
-                  testing::Property(
-                      &RepetitionPenaltyConfig::repetition_penalty, 1.2f),
-                  testing::Property(&RepetitionPenaltyConfig::presence_penalty,
-                                    0.5f),
-                  testing::Property(&RepetitionPenaltyConfig::frequency_penalty,
-                                    0.2f),
-                  testing::Property(&RepetitionPenaltyConfig::window_size,
-                                    10)))))
-      .WillOnce(
-          [](absl::AnyInvocable<void(absl::StatusOr<Responses>)> user_callback,
-             const DecodeConfig& decode_config) {
-            user_callback(Responses(TaskState::kProcessing, {"I am good."}));
-            user_callback(Responses(TaskState::kDone));
-            return nullptr;
-          });
-
-  ASSERT_OK_AND_ASSIGN(const Message response,
-                       conversation->SendMessage(user_message));
-}
-
-TEST_P(ConversationTest, SendMessageWithSuppressTokens) {
-  // Set up mock Session.
-  auto mock_session = CreateMockSession();
-  MockSession* mock_session_ptr = mock_session.get();
-  auto mock_engine = CreateMockEngine(std::move(mock_session));
-
-  SuppressTokensConfig suppress_tokens_config(/*suppress_tokens=*/{
-      1234,
-      5678,
-  });
-
-  // Create Conversation with SuppressTokensConfig.
-  ASSERT_OK_AND_ASSIGN(
-      auto conversation_config,
-      ConversationConfig::Builder()
-          .SetSessionConfig(session_config_)
-          .SetOverwritePromptTemplate(PromptTemplate(kTestJinjaPromptTemplate))
-          .SetSuppressTokensConfig(suppress_tokens_config)
-          .Build(*mock_engine));
-  ASSERT_OK_AND_ASSIGN(auto conversation,
-                       Conversation::Create(*mock_engine, conversation_config));
-
-  // Send a message.
-  Message user_message = {{"role", "user"}, {"content", "How are you?"}};
-
-  EXPECT_CALL(*mock_session_ptr, RunPrefillAsync(testing::_, testing::_))
-      .WillOnce([](const std::vector<InputData>& contents,
-                   absl::AnyInvocable<void(absl::StatusOr<Responses>)>
-                       user_callback) {
-        user_callback(Responses(TaskState::kDone));
-        return nullptr;
-      });
-
-  // Verify that the suppress tokens config is passed to RunDecode.
-  EXPECT_CALL(
-      *mock_session_ptr,
-      RunDecodeAsync(
-          testing::_,
-          testing::Property(
-              &DecodeConfig::GetSuppressTokensConfig,
-              testing::Property(&SuppressTokensConfig::suppress_tokens,
-                                suppress_tokens_config.suppress_tokens()))))
-      .WillOnce(
-          [](absl::AnyInvocable<void(absl::StatusOr<Responses>)> user_callback,
-             const DecodeConfig& decode_config) {
-            user_callback(Responses(TaskState::kProcessing, {"I am good."}));
-            user_callback(Responses(TaskState::kDone));
-            return nullptr;
-          });
-
-  ASSERT_OK_AND_ASSIGN(const Message response,
-                       conversation->SendMessage(user_message));
 }
 
 TEST_P(ConversationTest, Clone) {

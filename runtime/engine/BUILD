@@ -301,6 +301,7 @@ cc_library(
     hdrs = ["engine_settings.h"],
     deps = [
         "@com_google_absl//absl/base:nullability",
+        "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/log:absl_log",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
@@ -308,6 +309,7 @@ cc_library(
         "@com_google_absl//absl/strings:string_view",
         "@litert//support/tokenizer",
         "//runtime/components:model_resources",
+        "//runtime/components/logits_processor:suppress_tokens_config",
         "//runtime/executor:audio_executor_settings",
         "//runtime/executor:executor_settings_base",
         "//runtime/executor:llm_executor_settings",
@@ -331,6 +333,7 @@ cc_test(
     deps = [
         ":engine_settings",
         "@com_google_googletest//:gtest_main",
+        "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
@@ -338,6 +341,7 @@ cc_test(
         "@com_google_absl//absl/types:optional",
         "@litert//litert/cc/internal:scoped_file",
         "@litert//support/tokenizer",
+        "//runtime/components/logits_processor:suppress_tokens_config",
         "//runtime/executor:executor_settings_base",
         "//runtime/proto:engine_cc_proto",
         "//runtime/proto:llm_metadata_cc_proto",

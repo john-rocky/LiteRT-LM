@@ -266,6 +266,13 @@ absl::Status RunMultiTurnConversation(const LiteRtLmSettings& settings,
     if (settings.max_output_tokens > 0) {
       optional_args.max_output_tokens = settings.max_output_tokens;
     }
+    if (settings.repetition_penalty_config.enabled()) {
+      optional_args.repetition_penalty_config =
+          settings.repetition_penalty_config;
+    }
+    if (settings.suppress_tokens_config.enabled()) {
+      optional_args.suppress_tokens_config = settings.suppress_tokens_config;
+    }
     if (settings.visual_token_budget > 0 && conversation->GetConfig()
                                                 .GetSessionConfig()
                                                 .GetLlmModelType()
@@ -308,9 +315,13 @@ absl::Status RunSingleTurnSession(const std::string& input_prompt,
   if (settings.max_output_tokens > 0) {
     decode_config.SetMaxOutputTokens(settings.max_output_tokens);
   }
-
-  decode_config.SetRepetitionPenaltyConfig(settings.repetition_penalty_config);
-  decode_config.SetSuppressTokensConfig(settings.suppress_tokens_config);
+  if (settings.repetition_penalty_config.enabled()) {
+    decode_config.SetRepetitionPenaltyConfig(
+        settings.repetition_penalty_config);
+  }
+  if (settings.suppress_tokens_config.enabled()) {
+    decode_config.SetSuppressTokensConfig(settings.suppress_tokens_config);
+  }
 
   std::unique_ptr<Constraint> constraint;
   if (!settings.constraint_regex.empty()) {
@@ -799,13 +810,10 @@ absl::Status RunLiteRtLm(const LiteRtLmSettings& settings,
       }
     } else {
       ABSL_LOG(INFO) << "Creating conversation";
-      ASSIGN_OR_RETURN(
-          auto conversation_config,
-          ConversationConfig::Builder()
-              .SetSessionConfig(session_config)
-              .SetRepetitionPenaltyConfig(settings.repetition_penalty_config)
-              .SetSuppressTokensConfig(settings.suppress_tokens_config)
-              .Build(*engine));
+      ASSIGN_OR_RETURN(auto conversation_config,
+                       ConversationConfig::Builder()
+                           .SetSessionConfig(session_config)
+                           .Build(*engine));
       ASSIGN_OR_RETURN(conversation,
                        Conversation::Create(*engine, conversation_config));
       if (settings.multi_turns) {
