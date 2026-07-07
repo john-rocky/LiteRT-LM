@@ -118,7 +118,8 @@ def _execute_prompt(
             click.echo()
           click.echo(click.style(f"[{channel_name}] ", fg="blue"), nl=False)
           state.active_channel = channel_name
-        click.echo(click.style(channel_content, fg="yellow"), nl=False)
+        color = "blue" if channel_name.lower() == "thought" else "yellow"
+        click.echo(click.style(channel_content, fg=color), nl=False)
     if state.active_channel is not None:
       click.echo()
     else:
@@ -183,6 +184,7 @@ def run_interactive(
     max_num_tokens: int | None = None,
     max_num_images: int | None = None,
     filter_channel_content_from_kv_cache: bool = False,
+    thinking_budget: int = 0,
     vision_backend: str | None = None,
     audio_backend: str | None = None,
     attachments: tuple[str, ...] = (),
@@ -284,12 +286,20 @@ def run_interactive(
 
         handler = LoggingToolEventHandler(state) if tools else None
 
+        if thinking_budget != 0:
+          thinking_config = litert_lm.ThinkingConfig(
+              enable_thinking=True, thinking_token_budget=thinking_budget
+          )
+        else:
+          thinking_config = None
+
         runner_cm = engine.create_conversation(
             tools=tools,
             messages=messages,
             tool_event_handler=handler,
             extra_context=extra_context,
             filter_channel_content_from_kv_cache=filter_channel_content_from_kv_cache,
+            thinking_config=thinking_config,
             sampler_config=sampler_config,
         )
 
@@ -413,6 +423,15 @@ def run_interactive(
     help="Whether to filter channel content from the KV cache.",
 )
 @click.option(
+    "--thinking-budget",
+    type=int,
+    default=0,
+    help=(
+        "Budget for reasoning tokens. 0 disables thinking. -1 enables unlimited"
+        " thinking."
+    ),
+)
+@click.option(
     "--vision-backend",
     type=click.Choice(["cpu", "gpu"], case_sensitive=False),
     default=None,
@@ -489,6 +508,7 @@ def run(
     huggingface_token: str | None = None,
     max_num_tokens: int | None = None,
     filter_channel_content_from_kv_cache: bool = False,
+    thinking_budget: int = 0,
     vision_backend: str | None = None,
     audio_backend: str | None = None,
     attachment: tuple[str, ...] = (),
@@ -521,6 +541,8 @@ def run(
     max_num_tokens: Maximum number of tokens for the KV cache.
     filter_channel_content_from_kv_cache: Whether to filter channel content from
       the KV cache.
+    thinking_budget: Budget for reasoning tokens (0 disables thinking, -1
+      enables unlimited thinking).
     vision_backend: The backend to use for vision tasks.
     audio_backend: The backend to use for audio tasks.
     attachment: Path to an attachment (e.g., image or audio).
@@ -625,6 +647,7 @@ def run(
       max_num_tokens=max_num_tokens,
       max_num_images=max_num_images,
       filter_channel_content_from_kv_cache=filter_channel_content_from_kv_cache,
+      thinking_budget=thinking_budget,
       vision_backend=vision_backend,
       audio_backend=audio_backend,
       attachments=tuple(expanded_attachments),

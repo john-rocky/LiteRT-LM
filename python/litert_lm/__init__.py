@@ -35,6 +35,7 @@ from .interfaces import LoraConfig
 from .interfaces import LoraRankConfig
 from .interfaces import Responses
 from .interfaces import SamplerConfig
+from .interfaces import ThinkingConfig
 from .interfaces import Tool
 from .interfaces import ToolEventHandler
 from .session import Session
@@ -61,6 +62,7 @@ __all__ = (
     "Role",
     "SamplerConfig",
     "Session",
+    "ThinkingConfig",
     "Tool",
     "ToolCall",
     "ToolEventHandler",

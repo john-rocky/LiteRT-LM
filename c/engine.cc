@@ -38,6 +38,7 @@
 #include "runtime/conversation/io_types.h"
 #include "runtime/conversation/model_data_processor/config_registry.h"
 #include "runtime/conversation/model_data_processor/gemma4_data_processor_config.h"
+#include "runtime/conversation/thinking_config.h"
 #include "runtime/engine/engine.h"
 #include "runtime/engine/engine_factory.h"
 #include "runtime/engine/engine_settings.h"
@@ -161,7 +162,8 @@ std::optional<litert::lm::DataProcessorArguments> GetDataProcessorArguments(
 litert::lm::OptionalArgs CreateOptionalArgs(
     const litert::lm::Conversation* conversation, const char* extra_context,
     std::optional<int> visual_token_budget,
-    std::optional<int> max_output_tokens) {
+    std::optional<int> max_output_tokens,
+    std::optional<litert::lm::ThinkingConfig> thinking_config) {
   litert::lm::OptionalArgs litert_lm_optional_args;
   if (extra_context) {
     auto extra_context_json =
@@ -176,6 +178,9 @@ litert::lm::OptionalArgs CreateOptionalArgs(
   }
   if (max_output_tokens.has_value()) {
     litert_lm_optional_args.max_output_tokens = max_output_tokens;
+  }
+  if (thinking_config.has_value()) {
+    litert_lm_optional_args.thinking_config = *thinking_config;
   }
   return litert_lm_optional_args;
 }
@@ -341,11 +346,13 @@ struct LiteRtLmConversationConfig {
   bool filter_channel_content_from_kv_cache = false;
   bool stream_tool_calls = false;
   std::string stream_tool_calls_channel_name = "tool_call";
+  std::optional<litert::lm::ThinkingConfig> thinking_config;
 };
 
 struct LiteRtLmConversationOptionalArgs {
   std::optional<int> visual_token_budget;
   std::optional<int> max_output_tokens;
+  std::optional<litert::lm::ThinkingConfig> thinking_config;
 };
 
 struct LiteRtLmDetokenizeResult {
@@ -570,6 +577,41 @@ void litert_lm_conversation_config_set_stream_tool_calls(
   }
 }
 
+struct LiteRtLmThinkingConfig {
+  litert::lm::ThinkingConfig thinking_config;
+};
+
+LiteRtLmThinkingConfig* litert_lm_thinking_config_create() {
+  return new LiteRtLmThinkingConfig{litert::lm::ThinkingConfig(true, -1)};
+}
+
+void litert_lm_thinking_config_delete(LiteRtLmThinkingConfig* config) {
+  delete config;
+}
+
+void litert_lm_thinking_config_set_enable_thinking(
+    LiteRtLmThinkingConfig* config, bool enable_thinking) {
+  if (config) {
+    config->thinking_config = litert::lm::ThinkingConfig(
+        enable_thinking, config->thinking_config.thinking_token_budget());
+  }
+}
+
+void litert_lm_thinking_config_set_thinking_token_budget(
+    LiteRtLmThinkingConfig* config, int thinking_token_budget) {
+  if (config) {
+    config->thinking_config = litert::lm::ThinkingConfig(
+        config->thinking_config.enable_thinking(), thinking_token_budget);
+  }
+}
+
+void litert_lm_conversation_config_set_thinking_config(
+    LiteRtLmConversationConfig* config,
+    const LiteRtLmThinkingConfig* thinking_config) {
+  if (config && thinking_config) {
+    config->thinking_config = thinking_config->thinking_config;
+  }
+}
 void litert_lm_conversation_config_delete(LiteRtLmConversationConfig* config) {
   delete config;
 }
@@ -590,6 +632,14 @@ void litert_lm_conversation_optional_args_set_max_output_tokens(
     LiteRtLmConversationOptionalArgs* args, int max_output_tokens) {
   if (args) {
     args->max_output_tokens = max_output_tokens;
+  }
+}
+
+void litert_lm_conversation_optional_args_set_thinking_config(
+    LiteRtLmConversationOptionalArgs* args,
+    const LiteRtLmThinkingConfig* thinking_config) {
+  if (args && thinking_config) {
+    args->thinking_config = thinking_config->thinking_config;
   }
 }
 
@@ -1275,6 +1325,9 @@ LiteRtLmConversation* litert_lm_conversation_create(
         c_config->filter_channel_content_from_kv_cache);
     builder.SetStreamToolCalls(c_config->stream_tool_calls,
                                c_config->stream_tool_calls_channel_name);
+    if (c_config->thinking_config.has_value()) {
+      builder.SetThinkingConfig(*c_config->thinking_config);
+    }
     auto config = builder.Build(*engine->engine);
 
     if (!config.ok()) {
@@ -1342,7 +1395,8 @@ LiteRtLmJsonResponse* litert_lm_conversation_send_message(
   OptionalArgs litert_lm_optional_args = CreateOptionalArgs(
       conversation->conversation.get(), extra_context,
       optional_args ? optional_args->visual_token_budget : std::nullopt,
-      optional_args ? optional_args->max_output_tokens : std::nullopt);
+      optional_args ? optional_args->max_output_tokens : std::nullopt,
+      optional_args ? optional_args->thinking_config : std::nullopt);
 
   auto response = conversation->conversation->SendMessage(
       json_message, std::move(litert_lm_optional_args));
@@ -1386,7 +1440,8 @@ int litert_lm_conversation_send_message_stream(
   litert::lm::OptionalArgs litert_lm_optional_args = CreateOptionalArgs(
       conversation->conversation.get(), extra_context,
       optional_args ? optional_args->visual_token_budget : std::nullopt,
-      optional_args ? optional_args->max_output_tokens : std::nullopt);
+      optional_args ? optional_args->max_output_tokens : std::nullopt,
+      optional_args ? optional_args->thinking_config : std::nullopt);
 
   absl::Status status = conversation->conversation->SendMessageAsync(
       json_message, CreateConversationCallback(callback, callback_data),

@@ -47,8 +47,8 @@ class LiteRtLmTestBase(parameterized.TestCase):
         cache_dir=":nocache",
     )
 
-  @staticmethod
-  def _extract_text(stream):
+  @classmethod
+  def _extract_text(cls, stream):
     text_pieces = []
     for chunk in stream:
       content_list = chunk.get("content", [])
@@ -464,6 +464,28 @@ class EngineTest(LiteRtLmTestBase):
       user_message = {"role": "user", "content": "Hello world!"}
       message = conversation.send_message(user_message)
       self.assertEqual(message["role"], "assistant")
+
+  def test_conversation_with_thinking_config(self):
+    tc = litert_lm.ThinkingConfig(
+        enable_thinking=True, thinking_token_budget=10
+    )
+    with (
+        self._create_engine() as engine,
+        engine.create_conversation(thinking_config=tc) as conversation,
+    ):
+      user_message = {"role": "user", "content": "Hello world!"}
+      message = conversation.send_message(user_message, thinking_config=tc)
+      self.assertEqual(message["role"], "assistant")
+
+    with (
+        self._create_engine() as engine,
+        engine.create_conversation(thinking_config=tc) as conversation,
+    ):
+      user_message = {"role": "user", "content": "Hello world!"}
+      responses = list(
+          conversation.send_message_async(user_message, thinking_config=tc)
+      )
+      self.assertNotEmpty(responses)
 
   def test_conversation_token_count(self):
     with (

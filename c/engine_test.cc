@@ -15,6 +15,7 @@
 #include "c/engine.h"
 
 #include <fcntl.h>
+
 #include <algorithm>
 #include <cstring>
 #include <memory>
@@ -29,6 +30,7 @@
 #include "nlohmann/json.hpp"  // from @nlohmann_json
 #include "runtime/conversation/conversation.h"
 #include "runtime/conversation/io_types.h"
+#include "runtime/conversation/thinking_config.h"
 #include "runtime/engine/engine_settings.h"
 #include "runtime/executor/executor_settings_base.h"
 #include "runtime/executor/llm_executor_settings.h"
@@ -778,6 +780,54 @@ TEST(EngineCTest, CreateConversationConfigWithNoSystemMessage) {
   EXPECT_EQ(preface.messages, nullptr);
 }
 
+TEST(EngineCTest, ThinkingConfig) {
+  const std::string task_path = GetTestdataPath(
+      "litert_lm/runtime/testdata/test_lm.litertlm");
+  EngineSettingsPtr settings(litert_lm_engine_settings_create(
+                                 task_path.c_str(), "cpu", nullptr, nullptr),
+                             &litert_lm_engine_settings_delete);
+  ASSERT_NE(settings, nullptr);
+
+  EnginePtr engine(litert_lm_engine_create(settings.get()),
+                   &litert_lm_engine_delete);
+  ASSERT_NE(engine, nullptr);
+
+  SessionConfigPtr session_config(litert_lm_session_config_create(),
+                                  &litert_lm_session_config_delete);
+  ASSERT_NE(session_config, nullptr);
+
+  ConversationConfigPtr conversation_config(
+      litert_lm_conversation_config_create(),
+      &litert_lm_conversation_config_delete);
+  ASSERT_NE(conversation_config, nullptr);
+  litert_lm_conversation_config_set_session_config(conversation_config.get(),
+                                                   session_config.get());
+
+  // Set thinking_config on conversation config.
+  LiteRtLmThinkingConfig* thinking_config = litert_lm_thinking_config_create();
+  ASSERT_NE(thinking_config, nullptr);
+  litert_lm_thinking_config_set_enable_thinking(thinking_config, true);
+  litert_lm_thinking_config_set_thinking_token_budget(thinking_config, 42);
+  litert_lm_conversation_config_set_thinking_config(conversation_config.get(),
+                                                    thinking_config);
+  litert_lm_thinking_config_delete(thinking_config);
+
+  ConversationPtr conversation(
+      litert_lm_conversation_create(engine.get(), conversation_config.get()),
+      &litert_lm_conversation_delete);
+  ASSERT_NE(conversation, nullptr);
+
+  ASSERT_TRUE(
+      conversation->conversation->GetConfig().thinking_config().has_value());
+  EXPECT_TRUE(conversation->conversation->GetConfig()
+                  .thinking_config()
+                  ->enable_thinking());
+  EXPECT_EQ(conversation->conversation->GetConfig()
+                .thinking_config()
+                ->thinking_token_budget(),
+            42);
+}
+
 TEST(EngineCTest, TokenizerTest) {
   const std::string task_path = GetTestdataPath(
       "litert_lm/runtime/testdata/test_lm.litertlm");
@@ -1504,12 +1554,11 @@ using BenchmarkInfoPtr =
                     decltype(&litert_lm_benchmark_info_delete)>;
 
 TEST(EngineCTest, Benchmark) {
-  auto task_path =
-      std::filesystem::path(::testing::SrcDir()) /
-      "litert_lm/runtime/testdata/test_lm_new_metadata.task";
+  const std::string task_path = GetTestdataPath(
+      "litert_lm/runtime/testdata/test_lm_new_metadata.task");
 
   EngineSettingsPtr settings(
-      litert_lm_engine_settings_create(task_path.string().c_str(), "cpu",
+      litert_lm_engine_settings_create(task_path.c_str(), "cpu",
                                        /* vision_backend_str */ nullptr,
                                        /* audio_backend_str */ nullptr),
       &litert_lm_engine_settings_delete);

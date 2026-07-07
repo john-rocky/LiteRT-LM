@@ -30,10 +30,11 @@ from .conversation import Conversation
 from .session import Session
 from .utils import _parse_token_union
 from .utils import _sampler_config_to_params
+from .utils import _thinking_config_to_params
 
 
-# TODO: b/482060476 - Drop support for passing Backend class in 0.13.0.
 def _normalize_backend(backend: Any) -> Any:
+  # TODO: b/482060476 - Drop support for passing Backend class in 0.13.0.
   if isinstance(backend, type) and issubclass(backend, interfaces.Backend):
     warnings.warn(
         f"Passing Backend class {backend.__name__} is deprecated. "
@@ -216,6 +217,7 @@ class Engine(interfaces.AbstractEngine):
       automatic_tool_calling: bool = True,
       extra_context: collections.abc.Mapping[str, Any] | None = None,
       filter_channel_content_from_kv_cache: bool = False,
+      thinking_config: interfaces.ThinkingConfig | None = None,
       sampler_config: interfaces.SamplerConfig | None = None,
       system_message: str | None = None,
       enable_constrained_decoding: bool = False,
@@ -308,6 +310,16 @@ class Engine(interfaces.AbstractEngine):
       self._lib.litert_lm_conversation_config_set_filter_channel_content_from_kv_cache(
           conv_config, True
       )
+
+    if thinking_config is not None:
+      tc_ptr = _thinking_config_to_params(self._lib, thinking_config)
+      try:
+        self._lib.litert_lm_conversation_config_set_thinking_config(
+            conv_config, tc_ptr
+        )
+      finally:
+        if tc_ptr:
+          self._lib.litert_lm_thinking_config_delete(tc_ptr)
 
     conv_ptr = self._lib.litert_lm_conversation_create(
         self._engine_ptr, conv_config

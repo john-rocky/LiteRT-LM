@@ -178,6 +178,20 @@ class Tool(abc.ABC):
 
 
 @dataclasses.dataclass
+class ThinkingConfig:
+  """Configuration for thinking/reasoning generation.
+
+  Attributes:
+      enable_thinking: Whether thinking is enabled.
+      thinking_token_budget: Budget for token-by-token reasoning generation.
+        Defaults to -1 (infinite budget).
+  """
+
+  enable_thinking: bool = True
+  thinking_token_budget: int = -1
+
+
+@dataclasses.dataclass
 class SamplerConfig:
   """Configuration for the sampling process.
 
@@ -255,6 +269,7 @@ class AbstractEngine(abc.ABC):
       lora_rank_config: Configuration for LoRA ranks.
       bos_token_id: The BOS token id for the model if one is configured.
       eos_token_ids: Stop token sequences configured for the model.
+      activation_data_type: The activation data type used for model execution.
   """
 
   model_path: str
@@ -292,6 +307,7 @@ class AbstractEngine(abc.ABC):
       automatic_tool_calling: bool = True,
       extra_context: collections.abc.Mapping[str, Any] | None = None,
       filter_channel_content_from_kv_cache: bool = False,
+      thinking_config: ThinkingConfig | None = None,
       sampler_config: SamplerConfig | None = None,
       lora_config: LoraConfig | None = None,
       max_output_tokens: int | None = None,
@@ -310,6 +326,7 @@ class AbstractEngine(abc.ABC):
           from the KV cache. This is useful when the model responds with
           "channel" content, e.g. thinking/reasoning tokens, that should not be
           persisted in the KV cache.
+        thinking_config: Configuration for thinking/reasoning generation.
         sampler_config: Configuration for the sampling process. If None, then
           uses the engine's default values.
         lora_config: Configuration for LoRA adapters.
@@ -426,6 +443,7 @@ class AbstractConversation(abc.ABC):
       message: str | Contents | Message | collections.abc.Mapping[str, Any],
       *,
       max_output_tokens: int | None = None,
+      thinking_config: ThinkingConfig | None = None,
   ) -> collections.abc.Mapping[str, Any]:
     """Sends a message and returns the response.
 
@@ -437,6 +455,7 @@ class AbstractConversation(abc.ABC):
           tool calling is disabled and a tool response is required), or
           `collections.abc.Mapping` (super flexible raw dictionary format).
         max_output_tokens: The maximum number of output tokens.
+        thinking_config: Configuration for thinking/reasoning generation.
 
     Returns:
         A dictionary containing the model's response. The structure is:
@@ -449,6 +468,7 @@ class AbstractConversation(abc.ABC):
       message: str | Contents | Message | collections.abc.Mapping[str, Any],
       *,
       max_output_tokens: int | None = None,
+      thinking_config: ThinkingConfig | None = None,
   ) -> collections.abc.Iterator[collections.abc.Mapping[str, Any]]:
     """Sends a message and streams the response.
 
@@ -460,6 +480,7 @@ class AbstractConversation(abc.ABC):
           tool calling is disabled and a tool response is required), or
           `collections.abc.Mapping` (super flexible raw dictionary format).
         max_output_tokens: The maximum number of output tokens.
+        thinking_config: Configuration for thinking/reasoning generation.
 
     Returns:
         An iterator yielding dictionaries containing chunks of the model's
@@ -537,9 +558,9 @@ class AbstractBenchmark(abc.ABC):
       bos_token_id: The BOS token id for the model if one is configured.
       eos_token_ids: Stop token sequences configured for the model.
       prompt: The custom prompt string to tokenize and run. If the tokenized
-        prompt is shorter than `prefill_tokens`, the remaining tokens are
-        padded with zero. If it is longer, the prompt is truncated to
-        `prefill_tokens`.
+        prompt is shorter than `prefill_tokens`, the remaining tokens are padded
+        with zero. If it is longer, the prompt is truncated to `prefill_tokens`.
+      activation_data_type: The activation data type used for model execution.
   """
 
   model_path: str

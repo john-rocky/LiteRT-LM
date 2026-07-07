@@ -44,6 +44,25 @@ def _sampler_config_to_params(
   return params
 
 
+def _thinking_config_to_params(
+    lib,
+    config: interfaces.ThinkingConfig | None,
+) -> ctypes.c_void_p | None:
+  """Converts a ThinkingConfig to a LiteRtLmThinkingConfig opaque pointer."""
+  if config is None:
+    return None
+  params = lib.litert_lm_thinking_config_create()
+  if not params:
+    raise RuntimeError("Failed to create LiteRtLmThinkingConfig")
+  lib.litert_lm_thinking_config_set_enable_thinking(
+      params, config.enable_thinking
+  )
+  lib.litert_lm_thinking_config_set_thinking_token_budget(
+      params, config.thinking_token_budget
+  )
+  return params
+
+
 def _parse_token_union(lib, union_ptr):
   """Parses a C LiteRtLmTokenUnion into a Python string or list of IDs."""
   if not union_ptr:

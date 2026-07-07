@@ -14,7 +14,6 @@
 
 """Unit tests for the main litert-lm CLI."""
 
-import os
 import unittest.mock
 
 from absl.testing import absltest
@@ -24,7 +23,7 @@ from prompt_toolkit import key_binding
 import litert_lm
 from litert_lm_cli import common
 from litert_lm_cli import main
-from litert_lm_cli import model
+from litert_lm_cli.commands import run as run_cmd
 
 
 class MainTest(absltest.TestCase):
@@ -126,8 +125,6 @@ class MainTest(absltest.TestCase):
     mock_run_interactive.assert_not_called()
 
   def test_create_keybindings(self):
-    from litert_lm_cli.commands import run as run_cmd
-
     kb = run_cmd._create_keybindings()
     self.assertIsInstance(kb, key_binding.KeyBindings)
     # Check if expected keys are added.
@@ -273,6 +270,36 @@ class MainTest(absltest.TestCase):
     self.assertNotEqual(result.exit_code, 0)
     self.assertIn("Invalid value for '--activation-data-type'", result.output)
 
+  def test_run_thinking_budget_flag(self):
+    with unittest.mock.patch(
+        "litert_lm_cli.model.Model.from_model_reference",
+        autospec=True,
+    ) as mock_from_model_ref, unittest.mock.patch(
+        "litert_lm_cli.commands.run.run_interactive",
+        autospec=True,
+    ) as mock_run_interactive:
+      mock_model = unittest.mock.MagicMock()
+      mock_from_model_ref.return_value = mock_model
+      mock_model.exists.return_value = True
+
+      runner = CliRunner()
+      result = runner.invoke(
+          main.cli,
+          [
+              "run",
+              "my-model",
+              "--prompt",
+              "hi",
+              "--thinking-budget",
+              "10",
+          ],
+      )
+
+      self.assertEqual(result.exit_code, 0)
+      mock_run_interactive.assert_called_once()
+      kwargs = mock_run_interactive.call_args.kwargs
+      self.assertEqual(kwargs["thinking_budget"], 10)
+
   def test_run_no_template_flag(self):
     runner = CliRunner()
     # Test that --no-template is a valid option for the run command.
@@ -408,6 +435,7 @@ class MainTest(absltest.TestCase):
   def test_run_with_audio_attachment_default_backend(
       self, mock_run_interactive, mock_from_model_ref, mock_exists
   ):
+    del mock_exists  # unused
     mock_model = unittest.mock.MagicMock()
     mock_from_model_ref.return_value = mock_model
     mock_model.exists.return_value = True
@@ -441,6 +469,7 @@ class MainTest(absltest.TestCase):
   def test_run_with_image_attachment_default_backend(
       self, mock_run_interactive, mock_from_model_ref, mock_exists
   ):
+    del mock_exists  # unused
     mock_model = unittest.mock.MagicMock()
     mock_from_model_ref.return_value = mock_model
     mock_model.exists.return_value = True
@@ -474,6 +503,7 @@ class MainTest(absltest.TestCase):
   def test_run_with_unsupported_attachment_type(
       self, mock_run_interactive, mock_from_model_ref, mock_exists
   ):
+    del mock_exists  # unused
     mock_model = unittest.mock.MagicMock()
     mock_from_model_ref.return_value = mock_model
     mock_model.exists.return_value = True
@@ -505,6 +535,7 @@ class MainTest(absltest.TestCase):
   def test_run_with_non_existent_attachment(
       self, mock_run_interactive, mock_from_model_ref, mock_exists
   ):
+    del mock_exists  # unused
     mock_model = unittest.mock.MagicMock()
     mock_from_model_ref.return_value = mock_model
     mock_model.exists.return_value = True
