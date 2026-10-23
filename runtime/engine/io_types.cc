@@ -366,6 +366,29 @@ double BenchmarkInfo::GetTimeToFirstToken() const {
   return first_decode_token_seconds + first_prefill_token_seconds;
 }
 
+absl::Duration BenchmarkInfo::GetTotalInitTime() const {
+  const auto total =
+      init_phases_.find(std::string(InitPhaseToString(InitPhase::kTotal)));
+  if (total == init_phases_.end()) {
+    absl::Duration sum = absl::ZeroDuration();
+    for (const auto& [phase_name, duration] : init_phases_) {
+      sum += duration;
+    }
+    return sum;
+  }
+  const auto conversation = init_phases_.find(
+      std::string(InitPhaseToString(InitPhase::kConversation)));
+  if (conversation != init_phases_.end()) {
+    return total->second + conversation->second;
+  }
+  const auto session =
+      init_phases_.find(std::string(InitPhaseToString(InitPhase::kSession)));
+  if (session != init_phases_.end()) {
+    return total->second + session->second;
+  }
+  return total->second;
+}
+
 const std::string& BenchmarkInfo::GetProfileSummary() const {
   return profile_summary_;
 }

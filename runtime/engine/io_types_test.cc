@@ -450,6 +450,45 @@ TEST(BenchmarkInfoTests, GetTimeToFirstTokenValid) {
   EXPECT_GT(benchmark_info.GetTimeToFirstToken(), 0.104);
 }
 
+TEST(BenchmarkInfoTests, GetTotalInitTimeAddsSessionToInitTotal) {
+  BenchmarkInfo benchmark_info(GetBenchmarkParams());
+  EXPECT_OK(benchmark_info.InitPhaseRecord(BenchmarkInfo::InitPhase::kTotal,
+                                           absl::Milliseconds(800)));
+  EXPECT_OK(benchmark_info.InitPhaseRecord(
+      BenchmarkInfo::InitPhase::kModelAssets, absl::Milliseconds(2)));
+  EXPECT_OK(benchmark_info.InitPhaseRecord(BenchmarkInfo::InitPhase::kExecutor,
+                                           absl::Milliseconds(790)));
+  EXPECT_OK(benchmark_info.InitPhaseRecord(BenchmarkInfo::InitPhase::kTokenizer,
+                                           absl::Milliseconds(100)));
+  EXPECT_OK(benchmark_info.InitPhaseRecord(BenchmarkInfo::InitPhase::kSession,
+                                           absl::Milliseconds(10)));
+  // The engine creation phases are inside "Init Total" and are not added again.
+  EXPECT_EQ(benchmark_info.GetTotalInitTime(), absl::Milliseconds(810));
+}
+
+TEST(BenchmarkInfoTests, GetTotalInitTimeAddsConversationButNotSession) {
+  BenchmarkInfo benchmark_info(GetBenchmarkParams());
+  EXPECT_OK(benchmark_info.InitPhaseRecord(BenchmarkInfo::InitPhase::kTotal,
+                                           absl::Milliseconds(800)));
+  EXPECT_OK(benchmark_info.InitPhaseRecord(BenchmarkInfo::InitPhase::kExecutor,
+                                           absl::Milliseconds(790)));
+  EXPECT_OK(benchmark_info.InitPhaseRecord(BenchmarkInfo::InitPhase::kSession,
+                                           absl::Milliseconds(10)));
+  EXPECT_OK(benchmark_info.InitPhaseRecord(
+      BenchmarkInfo::InitPhase::kConversation, absl::Milliseconds(15)));
+  // Conversation creation includes session creation.
+  EXPECT_EQ(benchmark_info.GetTotalInitTime(), absl::Milliseconds(815));
+}
+
+TEST(BenchmarkInfoTests, GetTotalInitTimeWithoutInitTotalAddsAllPhases) {
+  BenchmarkInfo benchmark_info(GetBenchmarkParams());
+  EXPECT_OK(benchmark_info.InitPhaseRecord(BenchmarkInfo::InitPhase::kExecutor,
+                                           absl::Milliseconds(790)));
+  EXPECT_OK(benchmark_info.InitPhaseRecord(BenchmarkInfo::InitPhase::kTokenizer,
+                                           absl::Milliseconds(100)));
+  EXPECT_EQ(benchmark_info.GetTotalInitTime(), absl::Milliseconds(890));
+}
+
 TEST(BenchmarkInfoTests, OperatorOutputWithData) {
   BenchmarkInfo benchmark_info(GetBenchmarkParams());
   EXPECT_OK(

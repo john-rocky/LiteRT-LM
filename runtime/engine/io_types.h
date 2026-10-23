@@ -281,6 +281,14 @@ class BenchmarkInfo {
   uint64_t GetTotalTextToTokenIdsTurns() const;
   absl::StatusOr<BenchmarkTurnData> GetTextToTokenIdsTurn(int turn_index) const;
 
+  // --- Gets the total init time ---
+  // The time to create the engine plus the time to create the conversation, or
+  // the session when there is no conversation. "Init Total" already covers the
+  // other engine creation phases, and "Init Conversation" covers "Init
+  // Session", so those phases are not added again. Without "Init Total", it is
+  // the sum of all recorded init phases.
+  absl::Duration GetTotalInitTime() const;
+
   // --- Gets the time to the first token ---
   // Note that the first time to token doesn't include the time for
   // initialization. It is the sum of the prefill time for the first turn and
