@@ -2433,6 +2433,92 @@ TEST(LlmLiteRtCompiledModelExecutorDynamicTest, DecodeTest) {
 }
 
 TEST(LlmLiteRtCompiledModelExecutorDynamicTest,
+     DecodeGrowsKvCacheByAnEighthOfItsLength) {
+  LITERT_ASSERT_OK_AND_ASSIGN(
+      auto env, Environment::Create(std::vector<Environment::Option>()));
+  std::unique_ptr<ModelResources> model_resources;
+  std::unique_ptr<LlmLiteRtCompiledModelExecutorDynamic> executor;
+  {
+    ASSERT_OK_AND_ASSIGN(auto p,
+                         CreateDynamicExecutor(env, kTestDynamicModelPath,
+                                               /*kv_increment_size=*/8));
+    std::tie(model_resources, executor) = std::move(p);
+  }
+
+  // Records the KV cache length of every decode run: the dynamic dimension of
+  // the test model's key cache input kv_cache_k_0, [1, 2, kv_len, 64].
+  std::vector<int> kv_lengths;
+  executor->UpdatePreGraphRunCallback(
+      [&kv_lengths](absl::string_view signature_name, int current_step,
+                    absl::flat_hash_map<absl::string_view, TensorBuffer>&
+                        tensor_buffers) {
+        if (signature_name != "decode") return;
+        auto it = tensor_buffers.find("kv_cache_k_0");
+        ASSERT_NE(it, tensor_buffers.end());
+        auto tensor_type = it->second.TensorType();
+        ASSERT_TRUE(tensor_type);
+        kv_lengths.push_back(tensor_type->Layout().Dimensions()[2]);
+      });
+
+  // Prefilling 100 tokens fills 99 cache entries; the last token is the input
+  // of the first decode step.
+  constexpr int kPromptLength = 100;
+  std::vector<int> prompt(kPromptLength);
+  for (int i = 0; i < kPromptLength; ++i) {
+    prompt[i] = i % 7 + 1;
+  }
+  ASSERT_OK(executor->Prefill(MakeTextInputs(prompt)));
+
+  constexpr int kDecodeSteps = 200;
+  for (int i = 0; i < kDecodeSteps; ++i) {
+    ASSERT_OK(executor->Decode());
+  }
+  ASSERT_EQ(kv_lengths.size(), kDecodeSteps);
+  std::vector<int> resized_lengths;
+  for (int i = 0; i < kDecodeSteps; ++i) {
+    // Decode step i writes cache entry 99 + i.
+    EXPECT_GT(kv_lengths[i], 99 + i);
+    if (resized_lengths.empty() || resized_lengths.back() != kv_lengths[i]) {
+      resized_lengths.push_back(kv_lengths[i]);
+    }
+  }
+  // When full, the cache grows by an eighth of its length, and by at least
+  // kv_increment_size: 10 resizes in 200 steps instead of 25.
+  EXPECT_THAT(resized_lengths, ::testing::ElementsAre(111, 124, 139, 156, 175,
+                                                       196, 220, 247, 277, 311));
+}
+
+TEST(LlmLiteRtCompiledModelExecutorDynamicTest,
+     DecodedTokensDoNotDependOnKvCacheGrowth) {
+  LITERT_ASSERT_OK_AND_ASSIGN(
+      auto env, Environment::Create(std::vector<Environment::Option>()));
+  // The cache grows by max(1, kv_len / 8) entries in the first run and by 64 in
+  // the second, so the two runs hold different numbers of entries not written
+  // yet. Those are masked out, so both runs decode the same tokens.
+  std::vector<std::vector<int>> decoded_tokens;
+  for (uint32_t kv_increment_size : {1u, 64u}) {
+    std::unique_ptr<ModelResources> model_resources;
+    std::unique_ptr<LlmLiteRtCompiledModelExecutorDynamic> executor;
+    {
+      ASSERT_OK_AND_ASSIGN(auto p,
+                           CreateDynamicExecutor(env, kTestDynamicModelPath,
+                                                 kv_increment_size));
+      std::tie(model_resources, executor) = std::move(p);
+    }
+    ASSERT_OK(executor->Prefill(MakeTextInputs({1, 2, 0})));
+    std::vector<int> tokens;
+    for (int i = 0; i < 40; ++i) {
+      ASSERT_OK_AND_ASSIGN(auto output_tokens, executor->Decode());
+      ASSERT_EQ(output_tokens.size(), 1);
+      ASSERT_EQ(output_tokens[0].size(), 1);
+      tokens.push_back(output_tokens[0][0]);
+    }
+    decoded_tokens.push_back(std::move(tokens));
+  }
+  EXPECT_EQ(decoded_tokens[0], decoded_tokens[1]);
+}
+
+TEST(LlmLiteRtCompiledModelExecutorDynamicTest,
      SingleTokenInitialPrefillWithTokenModelAndEmbeddingLookupTest) {
   auto model_path =
       std::filesystem::path(::testing::SrcDir()) / kTestDynamicModelPath;

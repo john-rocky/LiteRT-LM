@@ -2958,7 +2958,12 @@ absl::Status LlmLiteRtCompiledModelExecutorDynamic::DecodeInternal(
   int current_kv_len = litert_state->GetNumEntries();
 
   if (current_kv_len <= llm_context_->runtime_state().current_step - 1) {
-    int entries_to_add = kv_increament_size_;
+    // A resize reallocates and copies the whole KV cache, so grow it by an
+    // eighth of its length, and by at least kv_increment_size: decoding n
+    // tokens then resizes O(log n) times instead of n / kv_increment_size
+    // times. The entries not written yet are masked out.
+    int entries_to_add =
+        std::max(static_cast<int>(kv_increament_size_), current_kv_len / 8);
     int new_kv_len = current_kv_len + entries_to_add;
     LITERT_RETURN_IF_ERROR(litert_state->Resize(
         *compiled_model_, kDecodeSignatureRunner, new_kv_len));

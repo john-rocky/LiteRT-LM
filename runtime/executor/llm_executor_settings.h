@@ -130,9 +130,10 @@ struct GpuConfig {
 std::ostream& operator<<(std::ostream& os, const GpuConfig& config);
 
 struct CpuConfig {
-  // The increment size of the kv-cache. This is used by dynamically exported
-  // models. Each time during decode, the kv-cache size is increased by this
-  // size.
+  // The minimum increment size of the kv-cache. This is used by dynamically
+  // exported models. Each time the kv-cache is full during decode, its size is
+  // increased by this size or by an eighth of its current size, whichever is
+  // larger.
   uint32_t kv_increment_size = 16;
 
   // The maximum number of tokens to process in a single prefill chunk. This
