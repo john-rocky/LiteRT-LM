@@ -211,6 +211,248 @@
       XCTAssertLessThan(apple.lowerBound, mango.lowerBound)
       XCTAssertLessThan(mango.lowerBound, zebra.lowerBound)
     }
+
+    // MARK: - Tool list encoding
+
+    /// The chat template `tojson`s each entry verbatim into the prompt, so the
+    /// string this produces is exactly what the model reads. `.bare` is LFM2's
+    /// trained format: no OpenAI envelope, `name` first, schema keys in trained
+    /// order, none of FM's bookkeeping left anywhere in it.
+    func testBareToolListMatchesTheTrainedFormat() throws {
+      let json = LiteRTLMExecutor.toolsJson(try Self.toolDefinitions(), style: .bare)
+
+      XCTAssertFalse(json.contains("\"function\""))
+      XCTAssertFalse(json.contains("\"title\""))
+      XCTAssertFalse(json.contains("x-order"))
+      XCTAssertFalse(json.contains("additionalProperties"))
+      XCTAssertTrue(
+        json.hasPrefix("[{\"name\": \"get_temperature\", \"description\": "),
+        "entries must open with the tool's name, not with whatever key sorts first: \(json)")
+      let type = try XCTUnwrap(json.range(of: "{\"type\": \"object\""))
+      let properties = try XCTUnwrap(json.range(of: "\"properties\"", range: type.lowerBound..<json.endIndex))
+      let required = try XCTUnwrap(json.range(of: "\"required\"", range: type.lowerBound..<json.endIndex))
+      XCTAssertLessThan(type.lowerBound, properties.lowerBound)
+      XCTAssertLessThan(properties.lowerBound, required.lowerBound)
+
+      // Still one valid JSON array of one object per tool.
+      let parsed = try XCTUnwrap(
+        try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [[String: Any]])
+      XCTAssertEqual(parsed.count, 2)
+      XCTAssertEqual(parsed.map { $0["name"] as? String }, ["get_temperature", "open_url"])
+    }
+
+    /// The default stays OpenAI-shaped for models (Qwen, Gemma) trained on the
+    /// envelope — but FM's bookkeeping is stripped there too.
+    func testDefaultToolListKeepsTheEnvelope() throws {
+      let json = LiteRTLMExecutor.toolsJson(try Self.toolDefinitions())
+      let parsed = try XCTUnwrap(
+        try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [[String: Any]])
+      XCTAssertEqual(parsed.count, 2)
+      for entry in parsed {
+        XCTAssertEqual(entry["type"] as? String, "function")
+        XCTAssertNotNil(entry["function"])
+      }
+      XCTAssertFalse(json.contains("\"title\""))
+      XCTAssertFalse(json.contains("additionalProperties"))
+    }
+
+    /// Embedded in the prompt, so it must not vary run to run — dictionary key
+    /// order is randomized per process.
+    func testToolListEncodingIsDeterministic() throws {
+      let tools = try Self.toolDefinitions()
+      let first = LiteRTLMExecutor.toolsJson(tools, style: .bare)
+      for _ in 0..<32 {
+        XCTAssertEqual(LiteRTLMExecutor.toolsJson(tools, style: .bare), first)
+      }
+    }
+
+    /// A tool without arguments is a name and a description — an empty
+    /// `parameters` object invites the model to invent some.
+    func testToolWithoutArgumentsCarriesNoParameters() throws {
+      let json = LiteRTLMExecutor.toolsJson(
+        [Transcript.ToolDefinition(tool: NoArgumentsTool())], style: .bare)
+      XCTAssertFalse(json.contains("\"parameters\""))
+      XCTAssertFalse(json.contains("\"required\""))
+    }
+
+    // MARK: - Native tool calls
+
+    /// The model writes its calls Python-style. `True` is a boolean, not the
+    /// string "True" (device run 2026-09-04: `set_torch(on=True)` reached FM
+    /// as a string and the call failed), and a doubled closer must not leak
+    /// into the last value.
+    func testNativeToolCallParsesPythonBooleansAndStrayClosers() throws {
+      let call = try XCTUnwrap(
+        LiteRTLMExecutor.parseNativeToolCall(
+          "<|tool_call_start|>[set_torch(on=True)]<|tool_call_end|>"))
+      XCTAssertEqual(call.name, "set_torch")
+      XCTAssertEqual(call.arguments, #"{"on":true}"#)
+
+      let doubled = try XCTUnwrap(
+        LiteRTLMExecutor.parseNativeToolCall(
+          "<|tool_call_start|>[set_torch(on=False))]<|tool_call_end|>"))
+      XCTAssertEqual(doubled.arguments, #"{"on":false}"#)
+
+      let mixed = try XCTUnwrap(
+        LiteRTLMExecutor.parseNativeToolCall(
+          "<|tool_call_start|>[translate(source='a, b)', to=\"ja\", n=2)]<|tool_call_end|>"))
+      let data = try XCTUnwrap(mixed.arguments.data(using: .utf8))
+      let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+      XCTAssertEqual(object["source"] as? String, "a, b)")
+      XCTAssertEqual(object["to"] as? String, "ja")
+      XCTAssertEqual(object["n"] as? Int, 2)
+    }
+
+    // MARK: - Guided generation
+
+    /// The schema goes into the trigger prompt and nowhere else.
+    func testPlanWritesTheSchemaIntoTheTriggerOnly() throws {
+      let schema = #"{"type":"object"}"#
+      let transcript = Transcript(entries: [
+        .instructions(
+          Transcript.Instructions(
+            segments: [.text(.init(content: "Be brief."))], toolDefinitions: [])),
+        .prompt(Transcript.Prompt(segments: [.text(.init(content: "Hi"))])),
+        .prompt(Transcript.Prompt(segments: [.text(.init(content: "List the colors"))])),
+      ])
+
+      let hinted = try LiteRTLMExecutor.plan(from: transcript, schemaJSON: schema, tools: [])
+      XCTAssertEqual(hinted.systemText, "Be brief.")
+      XCTAssertTrue(hinted.prompt.toString.hasPrefix("List the colors"))
+      XCTAssertTrue(hinted.prompt.toString.contains(schema))
+      XCTAssertEqual(hinted.history.map(\.toString), ["Hi"])
+      XCTAssertFalse(hinted.respondingToTool)
+    }
+
+    /// On the turn that answers a tool result, a guided request asks for the
+    /// structure; the plain turn asks for a sentence and forbids JSON.
+    func testPlanToolResultTriggerFollowsTheTurnKind() throws {
+      let tools = try Self.toolDefinitions()
+      let transcript = Transcript(entries: [
+        .prompt(Transcript.Prompt(segments: [.text(.init(content: "Weather?"))])),
+        .toolOutput(
+          Transcript.ToolOutput(
+            id: "1", toolName: "get_temperature", segments: [.text(.init(content: "21°C"))])),
+      ])
+
+      let plain = try LiteRTLMExecutor.plan(from: transcript, schemaJSON: nil, tools: tools)
+      XCTAssertTrue(plain.respondingToTool)
+      XCTAssertEqual(plain.toolResult, "21°C")
+      XCTAssertEqual(plain.toolRounds, 1)
+      XCTAssertTrue(plain.prompt.toString.contains("Do not output JSON"))
+
+      let schema = #"{"type":"object"}"#
+      let guided = try LiteRTLMExecutor.plan(from: transcript, schemaJSON: schema, tools: tools)
+      XCTAssertTrue(guided.respondingToTool)
+      XCTAssertFalse(guided.prompt.toString.contains("Do not output JSON"))
+      XCTAssertTrue(guided.prompt.toString.contains("Tool \"get_temperature\" returned: 21°C"))
+      XCTAssertTrue(guided.prompt.toString.contains("Using that result, respond with ONLY"))
+      XCTAssertTrue(guided.prompt.toString.contains(schema))
+    }
+
+    /// A tool session's question turn and the turn that answers its tool
+    /// result resolve to the same conversation — one key, the tools carried by
+    /// both — so a conversation rebuilt on the answer turn serves the next
+    /// question with its tools. A guided turn on the same session and another
+    /// tool set are other keys; an open conversation carries no tools and
+    /// accepts a response format. The key is the same string every time.
+    func testAnswerTurnAndQuestionTurnShareOneTooledConversation() throws {
+      let tools = try Self.toolDefinitions()
+      let model = LiteRTLanguageModel(
+        engineConfig: try EngineConfig(modelPath: Self.modelPath, backend: .cpu()),
+        toolListStyle: .bare)
+      let instructions = Transcript.Entry.instructions(
+        Transcript.Instructions(
+          segments: [.text(.init(content: "Be brief."))], toolDefinitions: tools))
+      let prompt = Transcript.Entry.prompt(
+        Transcript.Prompt(segments: [.text(.init(content: "Weather?"))]))
+      let output = Transcript.Entry.toolOutput(
+        Transcript.ToolOutput(
+          id: "1", toolName: "get_temperature", segments: [.text(.init(content: "21°C"))]))
+      let question = Transcript(entries: [instructions, prompt])
+      let answer = Transcript(entries: [instructions, prompt, output])
+      func spec(
+        _ transcript: Transcript, schema: String? = nil, guided: Bool = false,
+        tools: [Transcript.ToolDefinition]
+      ) throws -> LiteRTLMExecutor.ConversationSpec {
+        let plan = try LiteRTLMExecutor.plan(from: transcript, schemaJSON: schema, tools: tools)
+        return LiteRTLMExecutor.conversationSpec(
+          for: plan, guided: guided, tools: tools, model: model, options: GenerationOptions())
+      }
+
+      let asked = try spec(question, tools: tools)
+      let answering = try spec(answer, tools: tools)
+      XCTAssertEqual(asked.kind, .tooled)
+      XCTAssertEqual(answering.kind, .tooled)
+      XCTAssertEqual(answering.key, asked.key)
+      XCTAssertEqual(
+        answering.config.toolsJsonOverride, LiteRTLMExecutor.toolsJson(tools, style: .bare))
+      XCTAssertEqual(asked.config.toolsJsonOverride, answering.config.toolsJsonOverride)
+      XCTAssertFalse(answering.config.enableResponseFormat)
+      XCTAssertFalse(answering.config.automaticToolCalling)
+      XCTAssertEqual(
+        answering.config.initialMessages.map(\.toString),
+        try LiteRTLMExecutor.plan(from: answer, schemaJSON: nil, tools: tools).history
+          .map(\.toString))
+
+      let guided = try spec(question, schema: #"{"type":"object"}"#, guided: true, tools: tools)
+      XCTAssertEqual(guided.kind, .open)
+      XCTAssertNotEqual(guided.key, asked.key)
+      XCTAssertNil(guided.config.toolsJsonOverride)
+      XCTAssertTrue(guided.config.enableResponseFormat)
+
+      let fewer = Array(tools.prefix(1))
+      XCTAssertNotEqual(try spec(question, tools: fewer).key, asked.key)
+
+      for _ in 0..<16 {
+        XCTAssertEqual(try spec(question, tools: tools).key, asked.key)
+      }
+    }
+
+    /// A call the runtime parsed (gemma-4-E2B-it's arrive that way) is
+    /// forwarded in the same shape as one read from the text: the
+    /// name, and the arguments as a JSON object. None parsed → nil, so the text
+    /// parsers get their turn.
+    func testParsedToolCallTakesTheTextParsersShape() throws {
+      XCTAssertNil(LiteRTLMExecutor.toolCall([]))
+      let call = try XCTUnwrap(
+        LiteRTLMExecutor.toolCall([
+          ToolCall(name: "set_torch", id: "1", arguments: ["on": true, "level": 3])
+        ]))
+      XCTAssertEqual(call.name, "set_torch")
+      let data = try XCTUnwrap(call.arguments.data(using: .utf8))
+      let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+      XCTAssertEqual(object["on"] as? Bool, true)
+      XCTAssertEqual(object["level"] as? Int, 3)
+    }
+
+    /// `Transcript.ToolDefinition` values as FM itself builds them, taken off a
+    /// session rather than constructed by hand.
+    private static func toolDefinitions() throws -> [Transcript.ToolDefinition] {
+      [
+        Transcript.ToolDefinition(tool: StubTool()),
+        Transcript.ToolDefinition(tool: OpenURLTool()),
+      ]
+    }
+  }
+
+  @available(iOS 27.0, macOS 27.0, *)
+  private struct OpenURLTool: FoundationModels.Tool {
+    let name = "open_url"
+    let description = "Open a web page."
+    @Generable struct Arguments {
+      @Guide(description: "The URL to open")
+      var url: String
+    }
+    func call(arguments: Arguments) async throws -> String { "opened" }
+  }
+
+  @available(iOS 27.0, macOS 27.0, *)
+  private struct NoArgumentsTool: FoundationModels.Tool {
+    let name = "get_time"
+    let description = "The current time."
+    @Generable struct Arguments {}
+    func call(arguments: Arguments) async throws -> String { "12:00" }
   }
 
   /// Properties intentionally declared out of alphabetical order, so the sorted

@@ -266,6 +266,11 @@ public struct ConversationConfig {
   public let enableToolCallStreaming: Bool
   public let thinkingConfig: ThinkingConfig?
   public let automaticToolCalling: Bool
+  /// Tool descriptions as the engine's own JSON, for a host that already has a
+  /// tool registry of its own. `tools` builds this from Swift types via
+  /// reflection, which a host whose tools are values rather than types cannot
+  /// use. When set, this is passed through untouched.
+  public let toolsJsonOverride: String?
   public let enableResponseFormat: Bool
   public let visualTokenBudget: Int32?
   /// The speculative decoding configuration for this conversation, which overrides
@@ -295,6 +300,8 @@ public struct ConversationConfig {
   ///   - enableToolCallStreaming: Whether to enable conversation tool call streaming.
   ///   - thinkingConfig: Optional configuration for thinking/reasoning generation.
   ///   - automaticToolCalling: Whether to enable automatic tool calling. Default is true.
+  ///   - toolsJsonOverride: Tool descriptions as one JSON array, passed through in place of the
+  ///     array `ToolManager` builds from `tools`. Default is nil.
   ///   - enableResponseFormat: Whether to enable response format (constrained decoding). Default
   ///     is false.
   ///   - visualTokenBudget: Visual token budget.
@@ -314,6 +321,7 @@ public struct ConversationConfig {
     enableToolCallStreaming: Bool = false,
     thinkingConfig: ThinkingConfig? = nil,
     automaticToolCalling: Bool = true,
+    toolsJsonOverride: String? = nil,
     enableResponseFormat: Bool = false,
     visualTokenBudget: Int32? = nil,
     speculativeDecodingConfig: SpeculativeDecodingConfig? = nil,
@@ -334,6 +342,7 @@ public struct ConversationConfig {
     self.enableToolCallStreaming = enableToolCallStreaming
     self.thinkingConfig = thinkingConfig
     self.automaticToolCalling = automaticToolCalling
+    self.toolsJsonOverride = toolsJsonOverride
     self.enableResponseFormat = enableResponseFormat
     self.visualTokenBudget = visualTokenBudget
     self.speculativeDecodingConfig = speculativeDecodingConfig
