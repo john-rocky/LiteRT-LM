@@ -176,6 +176,13 @@ public struct ToolParam<Value: ToolParameterValue>: Decodable, ToolParamProtocol
   }
 }
 
+/// The protocol `Tool` and `OpenApiTool` share, so that `ConversationConfig.tools` takes both kinds
+/// of tools in one list.
+///
+/// Conform to `Tool` or `OpenApiTool` rather than to this protocol: `ToolManager` accepts no other
+/// kind of tool.
+public protocol ToolProtocol {}
+
 /// Example of how to define tools:
 /// - Adopt the `Tool` protocol to define a struct/class as a tool.
 /// - Use `@ToolParam` to define the parameters of the tool.
@@ -208,7 +215,7 @@ public struct ToolParam<Value: ToolParameterValue>: Decodable, ToolParamProtocol
 ///  A protocol a struct/class must conform to be used as a tool by the LiteRT-LM model.
 ///
 ///  - SeeAlso: `ToolParam` for defining parameters of the tool.
-public protocol Tool: Decodable {
+public protocol Tool: ToolProtocol, Decodable {
   /// The unique name of the tool.
   static var name: String { get }
   /// A description of what the tool does.
@@ -271,6 +278,53 @@ extension Tool {
 
     return schema
   }
+}
+
+/// A tool defined by its OpenAPI description rather than by a `Tool` type.
+///
+/// Use this when the description already exists as JSON, or when the tools are values rather than
+/// types, such as tools an app builds at run time. The description and the arguments are JSON
+/// strings, so any JSON library can be used.
+///
+/// ```swift
+/// struct AdditionTool: OpenApiTool {
+///   func getToolDescriptionJsonString() -> String {
+///     """
+///     {"name": "addition", "description": "Add all numbers.",
+///      "parameters": {"type": "object",
+///        "properties": {"numbers": {"type": "array", "items": {"type": "number"},
+///          "description": "The list of numbers to sum."}},
+///        "required": ["numbers"]}}
+///     """
+///   }
+///
+///   func execute(paramsJsonString: String) async throws -> String {
+///     // Parse paramsJsonString with the JSON library of your choice and run the tool.
+///     return #"{"sum": 13.5}"#
+///   }
+/// }
+/// ```
+///
+/// Pass instances in `ConversationConfig.tools`, in the same list as any `Tool`.
+public protocol OpenApiTool: ToolProtocol, Sendable {
+  /// Returns the tool's description as a JSON object in the OpenAPI format, with the keys:
+  /// - name: Required. The name of the tool.
+  /// - description: Optional. A brief description of the function.
+  /// - parameters: Optional. Describes the parameters to this function.
+  ///
+  /// `ToolManager` passes the string on as written, so its keys keep their order.
+  func getToolDescriptionJsonString() -> String
+
+  /// Executes the tool and returns the result as a JSON string.
+  ///
+  /// The conversation calls this only when `ConversationConfig.automaticToolCalling` is true;
+  /// otherwise the tool calls are returned to the caller.
+  ///
+  /// - Parameter paramsJsonString: A JSON object whose keys are the parameter names, for example
+  ///   `{"numbers":[3.0,4.5,6.0]}`.
+  /// - Returns: The result as a JSON string: a primitive value such as `13.5`, or an object such
+  ///   as `{"sum":13.5}`.
+  func execute(paramsJsonString: String) async throws -> String
 }
 
 extension String {

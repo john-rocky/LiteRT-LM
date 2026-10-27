@@ -21,6 +21,9 @@ public final class ToolManager: Sendable {
   /// We store the `Type` so we can instantiate new copies via Codable.
   private let toolRegistry: [String: Tool.Type]
 
+  /// A map of tool names to the tools defined by their OpenAPI descriptions.
+  private let openApiToolRegistry: [String: OpenApiTool]
+
   /// The JSON schema string representing all registered tools.
   /// This is computed once during initialization.
   public let toolsJsonDescription: String
@@ -29,30 +32,83 @@ public final class ToolManager: Sendable {
   ///
   /// - Parameter tools: A list of instantiated tools (e.g. `[GetWeatherTool()]`).
   ///   These instances are used *only* for schema generation. Execution uses new instances.
-  public init(tools: [Tool]) {
-    var registry: [String: Tool.Type] = [:]
-    var schemaList: [[String: Any]] = []
-    let useSnakeCase = ExperimentalFlags.convertCamelToSnakeCaseInToolDescription
-
+  public convenience init(tools: [Tool]) {
+    var toolRegistry: [String: Tool.Type] = [:]
+    var entries: [String] = []
     for tool in tools {
-      let name = type(of: tool).name
-      let toolNameInModel = useSnakeCase ? name.camelToSnakeCase() : name
-      registry[toolNameInModel] = type(of: tool)
-
-      // Use the provided instance to generate the schema via Mirror
-      schemaList.append(tool.getSchema())
+      Self.register(tool, in: &toolRegistry, entries: &entries)
     }
+    self.init(toolRegistry: toolRegistry, openApiToolRegistry: [:], entries: entries)
+  }
 
-    self.toolRegistry = registry
+  /// Initializes the ToolManager with tools of both kinds: `Tool` instances and `OpenApiTool`s.
+  ///
+  /// - Parameter tools: The tools, in the order the model reads them. A `Tool` instance is used
+  ///   only for schema generation, as in `init(tools:)`. An `OpenApiTool`'s description is used as
+  ///   written, inside the `{"type": "function", "function": ...}` object the native library
+  ///   expects.
+  /// - Throws: `LiteRTLMError.tool(.invalidDescription)` if an `OpenApiTool`'s description is not a
+  ///   JSON object with a `name` string, and `LiteRTLMError.tool(.unsupportedType)` for a tool that
+  ///   is neither a `Tool` nor an `OpenApiTool`.
+  public convenience init(tools: [ToolProtocol]) throws {
+    var toolRegistry: [String: Tool.Type] = [:]
+    var openApiToolRegistry: [String: OpenApiTool] = [:]
+    var entries: [String] = []
+    for tool in tools {
+      if let tool = tool as? OpenApiTool {
+        let description = tool.getToolDescriptionJsonString()
+        let name = try Self.name(inDescription: description)
+        openApiToolRegistry[name] = tool
+        // Concatenated, not re-serialized: JSONSerialization does not keep the key order.
+        entries.append(#"{"type":"function","function":"# + description + "}")
+      } else if let tool = tool as? Tool {
+        Self.register(tool, in: &toolRegistry, entries: &entries)
+      } else {
+        throw LiteRTLMError.tool(.unsupportedType(name: "\(type(of: tool))"))
+      }
+    }
+    self.init(
+      toolRegistry: toolRegistry, openApiToolRegistry: openApiToolRegistry, entries: entries)
+  }
 
-    // Serialize the schema list to a JSON string
-    if let data = try? JSONSerialization.data(withJSONObject: schemaList, options: []),
+  private init(
+    toolRegistry: [String: Tool.Type], openApiToolRegistry: [String: OpenApiTool],
+    entries: [String]
+  ) {
+    self.toolRegistry = toolRegistry
+    self.openApiToolRegistry = openApiToolRegistry
+    self.toolsJsonDescription = "[" + entries.joined(separator: ",") + "]"
+  }
+
+  /// Adds a `Tool` instance's type to the registry and its JSON schema to the entries.
+  private static func register(
+    _ tool: Tool, in registry: inout [String: Tool.Type], entries: inout [String]
+  ) {
+    let name = type(of: tool).name
+    let useSnakeCase = ExperimentalFlags.convertCamelToSnakeCaseInToolDescription
+    let toolNameInModel = useSnakeCase ? name.camelToSnakeCase() : name
+    registry[toolNameInModel] = type(of: tool)
+
+    // Use the provided instance to generate the schema via Mirror
+    if let data = try? JSONSerialization.data(withJSONObject: tool.getSchema(), options: []),
       let jsonString = String(data: data, encoding: .utf8)
     {
-      self.toolsJsonDescription = jsonString
-    } else {
-      self.toolsJsonDescription = "[]"
+      entries.append(jsonString)
     }
+  }
+
+  /// The `name` of an OpenAPI tool description.
+  private static func name(inDescription description: String) throws -> String {
+    guard
+      let object = try? JSONSerialization.jsonObject(with: Data(description.utf8))
+        as? [String: Any]
+    else {
+      throw LiteRTLMError.tool(.invalidDescription("Not a JSON object: \(description)"))
+    }
+    guard let name = object["name"] as? String, !name.isEmpty else {
+      throw LiteRTLMError.tool(.invalidDescription("No \"name\" string: \(description)"))
+    }
+    return name
   }
 
   /// Executes a tool based on the name and JSON arguments provided by the model.
@@ -61,7 +117,13 @@ public final class ToolManager: Sendable {
   ///   - name: The name of the tool to execute.
   ///   - arguments: The arguments as a dictionary.
   /// - Returns: The result of the tool execution. This will be a JSON-compatible type (String, Number, Bool, Array, Dictionary).
+  ///   For an `OpenApiTool`, it is the JSON string its `execute(paramsJsonString:)` returned.
   public func execute(name: String, arguments: [String: Any]) async throws -> Any {
+    if let openApiTool = openApiToolRegistry[name] {
+      let params = try JSONSerialization.data(withJSONObject: arguments)
+      return try await openApiTool.execute(
+        paramsJsonString: String(decoding: params, as: UTF8.self))
+    }
     guard let ToolType = toolRegistry[name] else {
       throw LiteRTLMError.tool(.notFound(name: name))
     }

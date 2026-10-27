@@ -426,11 +426,17 @@ public enum LiteRTLMError: Error, LocalizedError, Equatable {
   /// Specific errors related to tools.
   public enum ToolError: Error, LocalizedError, Equatable {
     case notFound(name: String)
+    case invalidDescription(String)
+    case unsupportedType(name: String)
 
     public var errorDescription: String? {
       switch self {
       case .notFound(let name):
         return "Tool '\(name)' not found."
+      case .invalidDescription(let details):
+        return "Invalid OpenAPI tool description. \(details)"
+      case .unsupportedType(let name):
+        return "Tool type '\(name)' is neither a Tool nor an OpenApiTool."
       }
     }
   }

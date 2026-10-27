@@ -226,7 +226,7 @@ public actor Engine {
       throw LiteRTLMError.config(.multipleSystemMessages)
     }
 
-    let toolManager = ToolManager(tools: conversationConfig.tools)
+    let toolManager = try ToolManager(tools: conversationConfig.tools)
 
     let systemMessageJsonStr = (try? conversationConfig.systemMessage?.contents.jsonString) ?? ""
     let toolDescriptionJsonStr = toolManager.toolsJsonDescription
