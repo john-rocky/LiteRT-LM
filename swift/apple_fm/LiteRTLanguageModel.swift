@@ -61,6 +61,22 @@
     case bare
   }
 
+  /// How a `respond(generating:)` turn is held to its schema.
+  @available(iOS 27.0, macOS 27.0, *)
+  public enum GuidedGeneration: Sendable, Hashable {
+    /// The engine constrains decoding to the schema (LiteRT-LM `ResponseFormat`,
+    /// llguidance): every token is checked against the grammar, so the output
+    /// cannot deviate from it. The schema is also written into the prompt
+    /// unless the caller's `ContextOptions.includeSchemaInPrompt` is false.
+    /// The default.
+    case constrained
+    /// The schema is only written into the prompt (again subject to
+    /// `includeSchemaInPrompt`); the output is whatever the model writes. For a
+    /// runtime built without constrained decoding, and for measuring what the
+    /// constraint buys.
+    case promptOnly
+  }
+
   /// A LiteRT-LM model exposed as an Apple Foundation Models backend.
   @available(iOS 27.0, macOS 27.0, *)
   public struct LiteRTLanguageModel: LanguageModel {
@@ -70,6 +86,9 @@
     public let executorConfiguration: LiteRTLMExecutor.Configuration
     public let visualTokenBudget: Int32?
     public let toolListStyle: ToolListStyle
+    /// Whether a schema is enforced by the engine or only asked for in the
+    /// prompt. See `GuidedGeneration`.
+    public let guidedGeneration: GuidedGeneration
     /// Cap on invisible reasoning, in tokens. Hybrid-thinking bundles (LFM2.5)
     /// declare a `<think>…</think>` channel in their metadata, and the runtime
     /// diverts everything inside it away from the stream. Without a budget
@@ -97,14 +116,18 @@
     ///     pick to match what the bundle's model saw in training.
     ///   - thinkingTokenBudget: Max invisible reasoning tokens per turn before
     ///     `</think>` is forced; ≤ 0 leaves thinking unbounded.
+    ///   - guidedGeneration: Whether a schema is enforced by the engine
+    ///     (`.constrained`, the default) or only written into the prompt.
     public init(
       engineConfig: EngineConfig, visualTokenBudget: Int32? = nil,
       toolListStyle: ToolListStyle = .openAIFunctions,
-      thinkingTokenBudget: Int = 256
+      thinkingTokenBudget: Int = 256,
+      guidedGeneration: GuidedGeneration = .constrained
     ) {
       self.visualTokenBudget = visualTokenBudget
       self.toolListStyle = toolListStyle
       self.thinkingTokenBudget = thinkingTokenBudget
+      self.guidedGeneration = guidedGeneration
       self.executorConfiguration = LiteRTLMExecutor.Configuration(
         engineConfig: engineConfig)
       let capabilities: [LanguageModelCapabilities.Capability] = {
@@ -133,6 +156,8 @@
     ///     pick to match what the bundle's model saw in training.
     ///   - thinkingTokenBudget: Max invisible reasoning tokens per turn before
     ///     `</think>` is forced; ≤ 0 leaves thinking unbounded.
+    ///   - guidedGeneration: Whether a schema is enforced by the engine
+    ///     (`.constrained`, the default) or only written into the prompt.
     /// - Throws: `LiteRTLMError` if `maxTokens` is less than or equal to 0.
     public init(
       modelPath: String,
@@ -143,7 +168,8 @@
       maxTokens: Int? = 2048,
       cacheDir: String? = nil,
       toolListStyle: ToolListStyle = .openAIFunctions,
-      thinkingTokenBudget: Int = 256
+      thinkingTokenBudget: Int = 256,
+      guidedGeneration: GuidedGeneration = .constrained
     ) throws {
       let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
       self.init(
@@ -153,7 +179,8 @@
           maxNumTokens: maxTokens, cacheDir: cacheDir ?? caches?.path),
         visualTokenBudget: visualTokenBudget,
         toolListStyle: toolListStyle,
-        thinkingTokenBudget: thinkingTokenBudget)
+        thinkingTokenBudget: thinkingTokenBudget,
+        guidedGeneration: guidedGeneration)
     }
 
     /// Release every cached LiteRT engine built for FM sessions, freeing their
@@ -221,19 +248,27 @@
     ) async throws {
       let engine = try await self.engine.ready()
       // Guided generation: a request that carries a schema is a structured-
-      // output contract. The schema is written into the prompt, and the engine
-      // also constrains decoding to it (`ResponseFormat`, llguidance), so the
-      // output cannot deviate from it. No tool menu on such a turn: the
-      // structure is the answer.
+      // output contract. The schema is written into the prompt unless the
+      // caller's `ContextOptions.includeSchemaInPrompt` says not to (FM's own
+      // knob, for a schema the instructions already describe), and under
+      // `.constrained` the engine also constrains decoding to it
+      // (`ResponseFormat`, llguidance), so the output cannot deviate from it.
+      // No tool menu on such a turn: the structure is the answer.
       //
       // Tools are different: they go to the engine as definitions and the model
       // calls them in its own trained format, which this executor parses back
       // (`parseNativeToolCall`).
       let tools = request.enabledToolDefinitions
-      let schemaJSON = request.schema.flatMap { try? Self.encodeSchema($0) }
+      let schemaJSON = try request.schema.map { try Self.encodeSchema($0) }
       let guided = schemaJSON != nil
-      let plan = try Self.plan(from: request.transcript, schemaJSON: schemaJSON, tools: tools)
-      let responseFormat = schemaJSON.flatMap { try? ResponseFormat.json(schema: $0) }
+      let schemaInPrompt = request.contextOptions.includeSchemaInPrompt ?? true
+      let constrained = guided && model.guidedGeneration == .constrained
+      let plan = try Self.plan(
+        from: request.transcript, schemaJSON: schemaInPrompt ? schemaJSON : nil,
+        guided: guided, constrained: constrained, tools: tools)
+      let responseFormat =
+        try constrained
+        ? schemaJSON.map { try ResponseFormat.json(schema: Self.engineSchema($0)) } : nil
       let offerTools = !tools.isEmpty && !plan.respondingToTool && !guided
 
       // LFM2.5 has its own tool-call format — `<|tool_call_start|>[name(args)]
@@ -302,7 +337,7 @@
         var firstToken: Date?
         for try await chunk in conversation.sendMessageStream(
           plan.prompt,
-          thinkingConfig: responseFormat != nil
+          thinkingConfig: constrained
             ? ThinkingConfig(enableThinking: false, thinkingTokenBudget: 0) : nil,
           responseFormat: responseFormat)
         {
@@ -315,7 +350,8 @@
         LiteRTFMTrace.timing(
           "guided turn: ttft \(String(format: "%.1f", (firstToken ?? done).timeIntervalSince(sent)))s"
             + ", decode \(String(format: "%.1f", done.timeIntervalSince(firstToken ?? done)))s"
-            + ", \(full.count) chars")
+            + ", \(full.count) chars, \(constrained ? "constrained" : "prompt only")"
+            + ", schema in prompt \(schemaInPrompt)")
         // Under the constraint the text is the object. Without one the model
         // may wrap it in prose or a code fence; the first balanced object is
         // taken.
@@ -510,10 +546,14 @@
     /// the message to generate from. The generation trigger is the last `.prompt`
     /// OR (in a tool round-trip) the last `.toolOutput`.
     ///
-    /// `schemaJSON` is the schema of a guided turn, written into the trigger;
-    /// nil for any other turn.
+    /// `schemaJSON` is the schema to write into the trigger, nil when none is
+    /// wanted there; `guided` says whether the turn expects a structure at all,
+    /// a separate question when the caller keeps the schema out of the prompt;
+    /// `constrained` says the engine will hold the output to the schema, which
+    /// changes how much of it the prompt has to carry.
     static func plan(
-      from transcript: Transcript, schemaJSON: String?, tools: [Transcript.ToolDefinition]
+      from transcript: Transcript, schemaJSON: String?, guided: Bool = false,
+      constrained: Bool = false, tools: [Transcript.ToolDefinition]
     ) throws -> Plan {
       let entries = Array(transcript)
       guard
@@ -575,7 +615,7 @@
         case .prompt(let p):
           var c = contents(of: p.segments)
           if isTrigger, let schemaJSON, !schemaJSON.isEmpty {
-            c.append(.text("\n\n" + schemaHint(schemaJSON)))
+            c.append(.text("\n\n" + schemaHint(schemaJSON, constrained: constrained)))
           }
           let message = Message(contents: c, role: .user)
           if isTrigger {
@@ -601,8 +641,10 @@
           // `maxToolRoundsPerQuestion`. A guided turn asks for the structure
           // instead — "do not output JSON" would be the one wrong thing to say.
           let instruction: String
-          if isTrigger, let schemaJSON {
-            let hint = schemaHint(schemaJSON)
+          if isTrigger && guided {
+            let hint =
+              schemaJSON.map { schemaHint($0, constrained: constrained) }
+              ?? "Respond with ONLY a JSON object. Output valid JSON and nothing else."
             instruction = "Using that result, " + hint.prefix(1).lowercased() + hint.dropFirst()
           } else {
             instruction =
@@ -815,7 +857,7 @@
         // Tooled conversations keep it off — with it on, the runtime derives a
         // tool-call grammar from the preface where the model's data processor
         // has one, and the native-format tool path here was measured without.
-        enableResponseFormat: kind == .open,
+        enableResponseFormat: kind == .open && model.guidedGeneration == .constrained,
         visualTokenBudget: model.visualTokenBudget)
     }
 
@@ -937,10 +979,117 @@
       }.joined(separator: " ")
     }
 
-    /// The schema-in-prompt text for the trigger.
-    static func schemaHint(_ schemaJSON: String) -> String {
-      "Respond with ONLY a JSON object that conforms to this JSON schema. "
-        + "Output valid JSON and nothing else:\n\(schemaJSON)"
+    /// The schema-in-prompt text for the trigger. The prompt carries what the
+    /// engine does not: without a grammar, a field list — name, type, enum
+    /// values, description — so the model knows the shape; under a grammar,
+    /// the key names alone, in order. Never the raw JSON schema: shown that,
+    /// a small model echoes it, and under a grammar the echo comes back as a
+    /// well-formed object full of the schema's own words ("title",
+    /// "PrimaryColors") — and a field list under a grammar did the same in
+    /// miniature, `": "` where a value should be. A schema without properties
+    /// (a bare type) is shown as it is.
+    static func schemaHint(_ schemaJSON: String, constrained: Bool = false) -> String {
+      guard let data = schemaJSON.data(using: .utf8),
+        let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+        root["properties"] is [String: Any]
+      else {
+        return "Respond with ONLY a JSON value that conforms to this JSON schema:\n"
+          + "\(schemaJSON)\nOutput valid JSON and nothing else."
+      }
+      if constrained {
+        return "Respond with ONLY a JSON object with exactly these keys, in this order: "
+          + propertyOrder(root).joined(separator: ", ") + ". Output valid JSON and nothing else."
+      }
+      var lines = ["Respond with ONLY a JSON object with these fields, in this order:"]
+      lines.append(contentsOf: fieldLines(root, indent: "- ") ?? [])
+      lines.append("Output valid JSON and nothing else.")
+      return lines.joined(separator: "\n")
+    }
+
+    /// One line per property — `- name (type[, one of: …][, optional]):
+    /// description` — in Foundation Models' declared order, nested objects
+    /// indented beneath their field.
+    private static func fieldLines(_ schema: [String: Any], indent: String) -> [String]? {
+      guard let properties = schema["properties"] as? [String: Any] else { return nil }
+      let required = Set(schema["required"] as? [String] ?? [])
+      var lines: [String] = []
+      for name in propertyOrder(schema) {
+        guard let property = properties[name] as? [String: Any] else { continue }
+        var kind = typeName(property)
+        if let values = property["enum"] as? [Any] {
+          kind += ", one of: " + values.map { "\($0)" }.joined(separator: ", ")
+        }
+        if !required.contains(name) { kind += ", optional" }
+        var line = "\(indent)\(name) (\(kind))"
+        if let description = property["description"] as? String, !description.isEmpty {
+          line += ": \(description)"
+        }
+        lines.append(line)
+        let nested =
+          (property["type"] as? String) == "array" ? property["items"] as? [String: Any] : property
+        if let nested, let inner = fieldLines(nested, indent: "  " + indent) {
+          lines.append(contentsOf: inner)
+        }
+      }
+      return lines
+    }
+
+    private static func typeName(_ property: [String: Any]) -> String {
+      if let type = property["type"] as? String {
+        if type == "array", let items = property["items"] as? [String: Any] {
+          return "array of \(typeName(items))"
+        }
+        return type
+      }
+      return property["anyOf"] != nil ? "one of the listed forms" : "value"
+    }
+
+    /// Property names in generation order: FM's `x-order` first, anything it
+    /// does not name alphabetically after.
+    private static func propertyOrder(_ schema: [String: Any]) -> [String] {
+      let properties = schema["properties"] as? [String: Any] ?? [:]
+      let declared = (schema["x-order"] as? [String] ?? []).filter { properties[$0] != nil }
+      return declared + properties.keys.filter { !declared.contains($0) }.sorted()
+    }
+
+    /// The schema as the engine's grammar compiler should see it: properties
+    /// in Foundation Models' declared generation order (`x-order`), which the
+    /// sorted-keys encoding loses and llguidance would replace with
+    /// alphabetical — the model was then made to fill `extras` before it had
+    /// read what was ordered. `title` and `x-order` are dropped on the way:
+    /// they are FM bookkeeping, not schema. Everything else stays sorted, so
+    /// the text is still the same run to run.
+    static func engineSchema(_ schemaJSON: String) -> String {
+      guard let data = schemaJSON.data(using: .utf8),
+        let root = try? JSONSerialization.jsonObject(with: data)
+      else { return schemaJSON }
+      return orderedJSON(root)
+    }
+
+    private static func orderedJSON(_ value: Any) -> String {
+      switch value {
+      case let object as [String: Any]:
+        let keys = object.keys.filter { $0 != "title" && $0 != "x-order" }.sorted()
+        let members = keys.map { key -> String in
+          if key == "properties", let properties = object[key] as? [String: Any] {
+            let body = propertyOrder(object).map {
+              "\(quotedJSON($0)):\(orderedJSON(properties[$0]!))"
+            }.joined(separator: ",")
+            return "\(quotedJSON(key)):{\(body)}"
+          }
+          return "\(quotedJSON(key)):\(orderedJSON(object[key]!))"
+        }
+        return "{" + members.joined(separator: ",") + "}"
+      case let array as [Any]:
+        return "[" + array.map(orderedJSON).joined(separator: ",") + "]"
+      case let string as String:
+        return quotedJSON(string)
+      case let number as NSNumber:
+        if CFGetTypeID(number) == CFBooleanGetTypeID() { return number.boolValue ? "true" : "false" }
+        return "\(number)"
+      default:
+        return "null"
+      }
     }
 
     /// Encode a schema to canonical JSON. `.sortedKeys` matters: dictionary key

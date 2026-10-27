@@ -354,7 +354,28 @@
 
     // MARK: - Guided generation
 
-    /// The schema goes into the trigger prompt and nowhere else.
+    /// The mode is a conversation-level choice, so two models over one engine
+    /// configuration in different modes share the engine.
+    func testGuidedGenerationModesShareOneEngine() throws {
+      let config = try EngineConfig(modelPath: Self.modelPath, backend: .cpu())
+      let constrained = LiteRTLanguageModel(engineConfig: config)
+      let promptOnly = LiteRTLanguageModel(engineConfig: config, guidedGeneration: .promptOnly)
+      XCTAssertEqual(constrained.guidedGeneration, .constrained)
+      XCTAssertEqual(promptOnly.guidedGeneration, .promptOnly)
+
+      let a = LanguageModelSession(model: constrained)
+      a.prewarm()
+      let b = LanguageModelSession(model: promptOnly)
+      b.prewarm()
+
+      withExtendedLifetime((a, b)) {
+        XCTAssertEqual(EngineCache.shared.count, 1)
+      }
+    }
+
+    /// The schema goes into the trigger prompt and nowhere else. When the
+    /// caller keeps it out of the prompt (`includeSchemaInPrompt: false`) the
+    /// trigger is the user's words alone, whatever the engine enforces.
     func testPlanWritesTheSchemaIntoTheTriggerOnly() throws {
       let schema = #"{"type":"object"}"#
       let transcript = Transcript(entries: [
@@ -365,12 +386,17 @@
         .prompt(Transcript.Prompt(segments: [.text(.init(content: "List the colors"))])),
       ])
 
-      let hinted = try LiteRTLMExecutor.plan(from: transcript, schemaJSON: schema, tools: [])
+      let hinted = try LiteRTLMExecutor.plan(
+        from: transcript, schemaJSON: schema, guided: true, tools: [])
       XCTAssertEqual(hinted.systemText, "Be brief.")
       XCTAssertTrue(hinted.prompt.toString.hasPrefix("List the colors"))
       XCTAssertTrue(hinted.prompt.toString.contains(schema))
       XCTAssertEqual(hinted.history.map(\.toString), ["Hi"])
       XCTAssertFalse(hinted.respondingToTool)
+
+      let bare = try LiteRTLMExecutor.plan(
+        from: transcript, schemaJSON: nil, guided: true, tools: [])
+      XCTAssertEqual(bare.prompt.toString, "List the colors")
     }
 
     /// On the turn that answers a tool result, a guided request asks for the
@@ -391,7 +417,8 @@
       XCTAssertTrue(plain.prompt.toString.contains("Do not output JSON"))
 
       let schema = #"{"type":"object"}"#
-      let guided = try LiteRTLMExecutor.plan(from: transcript, schemaJSON: schema, tools: tools)
+      let guided = try LiteRTLMExecutor.plan(
+        from: transcript, schemaJSON: schema, guided: true, tools: tools)
       XCTAssertTrue(guided.respondingToTool)
       XCTAssertFalse(guided.prompt.toString.contains("Do not output JSON"))
       XCTAssertTrue(guided.prompt.toString.contains("Tool \"get_temperature\" returned: 21°C"))
@@ -424,7 +451,8 @@
         _ transcript: Transcript, schema: String? = nil, guided: Bool = false,
         tools: [Transcript.ToolDefinition]
       ) throws -> LiteRTLMExecutor.ConversationSpec {
-        let plan = try LiteRTLMExecutor.plan(from: transcript, schemaJSON: schema, tools: tools)
+        let plan = try LiteRTLMExecutor.plan(
+          from: transcript, schemaJSON: schema, guided: guided, tools: tools)
         return LiteRTLMExecutor.conversationSpec(
           for: plan, guided: guided, tools: tools, model: model, options: GenerationOptions())
       }
@@ -474,6 +502,69 @@
       XCTAssertEqual(object["on"] as? Bool, true)
       XCTAssertEqual(object["level"] as? Int, 3)
     }
+
+    /// Under the grammar the prompt names only the keys, in declared order:
+    /// the engine holds the types and the enum values, and every further word
+    /// in the hint was something the model copied into a value.
+    func testSchemaHintUnderTheConstraintNamesOnlyTheKeys() {
+      let hint = LiteRTLMExecutor.schemaHint(Self.orderSchema, constrained: true)
+      XCTAssertEqual(
+        hint,
+        "Respond with ONLY a JSON object with exactly these keys, in this order: "
+          + "item, size, quantity, extras. Output valid JSON and nothing else.")
+    }
+
+    /// A schema as Foundation Models encodes one — `x-order`, `title`,
+    /// descriptions, an enum, an optional — rendered for the prompt: one line
+    /// per field in declared order, and none of the schema's own vocabulary
+    /// for the model to echo.
+    func testSchemaHintListsFieldsInDeclaredOrder() throws {
+      let hint = LiteRTLMExecutor.schemaHint(Self.orderSchema)
+      let item = try XCTUnwrap(hint.range(of: "- item (string): The drink ordered"))
+      let size = try XCTUnwrap(hint.range(of: "- size (string, one of: small, medium, large)"))
+      let quantity = try XCTUnwrap(hint.range(of: "- quantity (integer)"))
+      let extras = try XCTUnwrap(hint.range(of: "- extras (array of string, optional)"))
+      XCTAssertLessThan(item.lowerBound, size.lowerBound)
+      XCTAssertLessThan(size.lowerBound, quantity.lowerBound)
+      XCTAssertLessThan(quantity.lowerBound, extras.lowerBound)
+      XCTAssertFalse(hint.contains("x-order"))
+      XCTAssertFalse(hint.contains("CoffeeOrder"))
+      XCTAssertTrue(hint.hasSuffix("Output valid JSON and nothing else."))
+    }
+
+    /// A schema with no properties — a bare type — is shown as it is.
+    func testSchemaHintFallsBackToTheRawSchemaWithoutProperties() {
+      let hint = LiteRTLMExecutor.schemaHint(#"{"type":"string"}"#)
+      XCTAssertTrue(hint.contains(#"{"type":"string"}"#))
+      XCTAssertTrue(hint.hasSuffix("Output valid JSON and nothing else."))
+    }
+
+    /// The engine sees the properties in `x-order` — the order the model
+    /// fills them in under the grammar — with the bookkeeping keys gone, and
+    /// the same text every time.
+    func testEngineSchemaFollowsDeclaredOrder() throws {
+      let engine = LiteRTLMExecutor.engineSchema(Self.orderSchema)
+      let item = try XCTUnwrap(engine.range(of: "\"item\""))
+      let size = try XCTUnwrap(engine.range(of: "\"size\""))
+      let quantity = try XCTUnwrap(engine.range(of: "\"quantity\""))
+      let extras = try XCTUnwrap(engine.range(of: "\"extras\""))
+      XCTAssertLessThan(item.lowerBound, size.lowerBound)
+      XCTAssertLessThan(size.lowerBound, quantity.lowerBound)
+      XCTAssertLessThan(quantity.lowerBound, extras.lowerBound)
+      XCTAssertFalse(engine.contains("x-order"))
+      XCTAssertFalse(engine.contains("\"title\""))
+      XCTAssertTrue(engine.contains("\"required\":[\"item\",\"size\",\"quantity\"]"))
+      for _ in 0..<16 {
+        XCTAssertEqual(LiteRTLMExecutor.engineSchema(Self.orderSchema), engine)
+      }
+      XCTAssertNoThrow(try ResponseFormat.json(schema: engine))
+    }
+
+    /// Sorted-keys encoding of a four-field schema, as `encodeSchema` emits it:
+    /// alphabetical, with `x-order` carrying the declared order.
+    private static let orderSchema = #"""
+      {"additionalProperties":false,"properties":{"extras":{"description":"Extras asked for","items":{"type":"string"},"type":"array"},"item":{"description":"The drink ordered","type":"string"},"quantity":{"description":"How many cups","type":"integer"},"size":{"description":"Cup size","enum":["small","medium","large"],"type":"string"}},"required":["item","size","quantity"],"title":"CoffeeOrder","type":"object","x-order":["item","size","quantity","extras"]}
+      """#
 
     /// `Transcript.ToolDefinition` values as FM itself builds them, taken off a
     /// session rather than constructed by hand.
