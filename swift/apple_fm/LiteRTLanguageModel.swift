@@ -70,6 +70,20 @@
     public let executorConfiguration: LiteRTLMExecutor.Configuration
     public let visualTokenBudget: Int32?
     public let toolListStyle: ToolListStyle
+    /// Cap on invisible reasoning, in tokens. Hybrid-thinking bundles (LFM2.5)
+    /// declare a `<think>…</think>` channel in their metadata, and the runtime
+    /// diverts everything inside it away from the stream. Without a budget
+    /// nothing forces the block closed: a turn where the model decides to think
+    /// generates unseen at decode speed — 25–40 s on a phone — and can end with
+    /// an empty message, which Foundation Models reports as "Session ended
+    /// without producing a response". The budget forces `</think>` after this
+    /// many thinking tokens. Zero or negative disables the cap.
+    ///
+    /// The runtime installs the cap only with thinking enabled, so a budget
+    /// above zero also hands `enable_thinking` to the chat template. A template
+    /// that acts on it — gemma-4-E2B-it's does — then thinks on every plain
+    /// turn, within the cap; LFM2.5's template ignores the flag.
+    public let thinkingTokenBudget: Int
 
     /// Build from an `EngineConfig` (the primary initializer). The whole config is
     /// carried through to the engine verbatim — including `cacheDir`, `loraRank`,
@@ -81,12 +95,16 @@
     ///     value, not part of `EngineConfig`); nil = engine default.
     ///   - toolListStyle: How tool definitions are written into the prompt;
     ///     pick to match what the bundle's model saw in training.
+    ///   - thinkingTokenBudget: Max invisible reasoning tokens per turn before
+    ///     `</think>` is forced; ≤ 0 leaves thinking unbounded.
     public init(
       engineConfig: EngineConfig, visualTokenBudget: Int32? = nil,
-      toolListStyle: ToolListStyle = .openAIFunctions
+      toolListStyle: ToolListStyle = .openAIFunctions,
+      thinkingTokenBudget: Int = 256
     ) {
       self.visualTokenBudget = visualTokenBudget
       self.toolListStyle = toolListStyle
+      self.thinkingTokenBudget = thinkingTokenBudget
       self.executorConfiguration = LiteRTLMExecutor.Configuration(
         engineConfig: engineConfig)
       let capabilities: [LanguageModelCapabilities.Capability] = {
@@ -113,6 +131,8 @@
     ///     directory).
     ///   - toolListStyle: How tool definitions are written into the prompt;
     ///     pick to match what the bundle's model saw in training.
+    ///   - thinkingTokenBudget: Max invisible reasoning tokens per turn before
+    ///     `</think>` is forced; ≤ 0 leaves thinking unbounded.
     /// - Throws: `LiteRTLMError` if `maxTokens` is less than or equal to 0.
     public init(
       modelPath: String,
@@ -122,7 +142,8 @@
       visualTokenBudget: Int32? = nil,
       maxTokens: Int? = 2048,
       cacheDir: String? = nil,
-      toolListStyle: ToolListStyle = .openAIFunctions
+      toolListStyle: ToolListStyle = .openAIFunctions,
+      thinkingTokenBudget: Int = 256
     ) throws {
       let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
       self.init(
@@ -131,7 +152,8 @@
           visionBackend: visionBackend, audioBackend: audioBackend,
           maxNumTokens: maxTokens, cacheDir: cacheDir ?? caches?.path),
         visualTokenBudget: visualTokenBudget,
-        toolListStyle: toolListStyle)
+        toolListStyle: toolListStyle,
+        thinkingTokenBudget: thinkingTokenBudget)
     }
 
     /// Release every cached LiteRT engine built for FM sessions, freeing their
@@ -270,12 +292,19 @@
 
       if guided {
         // Buffered: FM parses the structure out of the text it is handed, and
-        // a half-written object is not one.
+        // a half-written object is not one. Under the constraint the thinking
+        // budget is switched off for this turn: the runtime wraps the caller's
+        // constraint in its thinking-budget constraint, and on a hybrid bundle
+        // that pairing failed every guided turn (llguidance panic at token 0);
+        // the grammar itself keeps `<think>` out, so nothing is lost.
         var full = ""
         let sent = Date()
         var firstToken: Date?
         for try await chunk in conversation.sendMessageStream(
-          plan.prompt, responseFormat: responseFormat)
+          plan.prompt,
+          thinkingConfig: responseFormat != nil
+            ? ThinkingConfig(enableThinking: false, thinkingTokenBudget: 0) : nil,
+          responseFormat: responseFormat)
         {
           let piece = chunk.toString
           if firstToken == nil, !piece.isEmpty { firstToken = Date() }
@@ -332,7 +361,7 @@
                 id: UUID().uuidString, name: call.name,
                 action: .appendArguments(arguments, tokenCount: arguments.count))))
         } else {
-          var answer = replyText.trimmingCharacters(in: .whitespacesAndNewlines)
+          var answer = Self.visibleAnswer(replyText)
           if answer.isEmpty {
             answer = thought.trimmingCharacters(in: .whitespacesAndNewlines)
           }
@@ -380,7 +409,7 @@
           // own words. Something is always sent: an executor that returns
           // without sending is an FM error — "Session ended without producing a
           // response" — that poisons the transcript for every beat after it.
-          var answer = replyText.trimmingCharacters(in: .whitespacesAndNewlines)
+          var answer = Self.visibleAnswer(replyText)
           if native != nil || answer.isEmpty {
             answer = plan.toolResult ?? answer
           }
@@ -472,9 +501,9 @@
     /// call — before the model is made to answer with what it has.
     static let maxToolRoundsPerQuestion = 2
 
-    /// KV room a turn needs: its prompt and its generation. A cached
-    /// conversation closer to the ceiling than this is dropped and rebuilt
-    /// from the windowed transcript.
+    /// KV room a turn needs: its prompt, its generation, and the thinking
+    /// budget. A cached conversation closer to the ceiling than this is
+    /// dropped and rebuilt from the windowed transcript.
     static let turnTokenHeadroom = 384
 
     /// Split the FM transcript into a system message, prior turns (history), and
@@ -758,6 +787,15 @@
         systemMessage: plan.systemMessage,
         initialMessages: plan.history,
         samplerConfig: Self.sampler(for: options, structured: structured),
+        // Cap invisible reasoning. Never `enableThinking: false` here: the
+        // runtime only installs the budget constraint when thinking is
+        // enabled — disabling it removes the cap and leaves the model free
+        // to think, unseen and unbounded (LFM2.5's template ignores the
+        // `enable_thinking` flag; gemma-4's acts on it, see
+        // `thinkingTokenBudget`).
+        thinkingConfig: model.thinkingTokenBudget > 0
+          ? ThinkingConfig(enableThinking: true, thinkingTokenBudget: model.thinkingTokenBudget)
+          : nil,
         // Off: FM runs the tools and re-invokes this executor with the result.
         // Letting the runtime run them too would execute everything twice.
         automaticToolCalling: false,
@@ -785,6 +823,18 @@
       -> Conversation
     {
       try await engine.createConversation(with: config)
+    }
+
+    /// The part of a reply that is meant for the user. The thinking budget
+    /// force-closes `</think>` after N tokens, but the model does not know
+    /// that: it keeps reasoning into the visible stream and closes the block
+    /// again itself — so text before the *last* closer is thought that leaked,
+    /// not answer ("…short answer as requested.</think>You are near CAFE LA…").
+    static func visibleAnswer(_ text: String) -> String {
+      let tail = text.range(of: "</think>", options: .backwards).map { text[$0.upperBound...] }
+      var answer = String(tail ?? text[...])
+      if answer.hasPrefix("<think>") { answer.removeFirst("<think>".count) }
+      return answer.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// FM's tool definitions as the string the model will read. The runtime

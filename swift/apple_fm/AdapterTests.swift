@@ -275,6 +275,55 @@
       XCTAssertFalse(json.contains("\"required\""))
     }
 
+    // MARK: - Thinking budget
+
+    /// The budget rides on every conversation the executor builds, with
+    /// thinking enabled: the runtime installs the cap only then. Zero leaves
+    /// the conversation without a thinking config, as before the budget.
+    func testThinkingBudgetRidesOnTheConversation() throws {
+      let transcript = Transcript(entries: [
+        .prompt(Transcript.Prompt(segments: [.text(.init(content: "Hi"))]))
+      ])
+      let plan = try LiteRTLMExecutor.plan(from: transcript, schemaJSON: nil, tools: [])
+      let config = try EngineConfig(modelPath: Self.modelPath, backend: .cpu())
+      func thinking(_ model: LiteRTLanguageModel) -> ThinkingConfig? {
+        LiteRTLMExecutor.conversationSpec(
+          for: plan, guided: false, tools: [], model: model, options: GenerationOptions()
+        ).config.thinkingConfig
+      }
+
+      XCTAssertEqual(
+        thinking(LiteRTLanguageModel(engineConfig: config)),
+        ThinkingConfig(enableThinking: true, thinkingTokenBudget: 256))
+      XCTAssertEqual(
+        thinking(LiteRTLanguageModel(engineConfig: config, thinkingTokenBudget: 64)),
+        ThinkingConfig(enableThinking: true, thinkingTokenBudget: 64))
+      XCTAssertNil(thinking(LiteRTLanguageModel(engineConfig: config, thinkingTokenBudget: 0)))
+    }
+
+    // MARK: - Thinking leak
+
+    /// The budget force-closes `</think>` mid-thought; the model keeps
+    /// reasoning into the visible stream and closes again itself. Only what
+    /// follows the last closer is the answer.
+    func testVisibleAnswerDropsLeakedThought() {
+      XCTAssertEqual(
+        LiteRTLMExecutor.visibleAnswer(
+          "I am near CAFE LA. Let me answer as requested.</think>You are near CAFE LA."),
+        "You are near CAFE LA.")
+      XCTAssertEqual(
+        LiteRTLMExecutor.visibleAnswer("first</think>middle</think> final answer "),
+        "final answer")
+    }
+
+    func testVisibleAnswerKeepsPlainRepliesAndEmptiesThoughtOnly() {
+      XCTAssertEqual(
+        LiteRTLMExecutor.visibleAnswer("  You are in Chuo, Osaka. "), "You are in Chuo, Osaka.")
+      XCTAssertEqual(LiteRTLMExecutor.visibleAnswer("all of this was reasoning</think>"), "")
+      XCTAssertEqual(LiteRTLMExecutor.visibleAnswer("<think>still open, never closed"),
+        "still open, never closed")
+    }
+
     // MARK: - Native tool calls
 
     /// The model writes its calls Python-style. `True` is a boolean, not the
