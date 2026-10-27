@@ -508,6 +508,7 @@ cc_library(
     srcs = ["litert_util.cc"],
     hdrs = ["litert_util.h"],
     deps = [
+        ":file_util",
         ":litert_lm_loader",
         ":logging",
         ":scoped_file",

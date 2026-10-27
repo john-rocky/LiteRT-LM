@@ -310,6 +310,70 @@ TEST(LiteRtUtilTest, GetEnvironment_NPUFirst_IncludesNPUOptions) {
 #endif
 }
 
+// Returns the compiler cache directory that CreateEnvironment passes to LiteRT
+// for an NPU engine, or std::nullopt if it passes none.
+absl::StatusOr<std::optional<std::string>> GetNpuCompilerCacheDir(
+    absl::string_view model_path, absl::string_view cache_dir) {
+  auto model_assets = ModelAssets::Create(model_path);
+  if (!model_assets.ok()) return model_assets.status();
+  auto settings = EngineSettings::CreateDefault(*model_assets, Backend::NPU);
+  if (!settings.ok()) return settings.status();
+  settings->GetMutableMainExecutorSettings().SetCacheDir(
+      std::string(cache_dir));
+  auto env = CreateEnvironment(*settings, nullptr);
+  if (!env.ok()) return env.status();
+  auto options = env->env.GetOptions();
+  if (!options.HasValue()) {
+    return absl::InternalError("The environment has no options.");
+  }
+  auto compiler_cache_dir =
+      options->GetOption(EnvironmentOptions::Tag::kCompilerCacheDir);
+  if (!compiler_cache_dir.HasValue()) return std::nullopt;
+  return std::string(std::get<const char*>(*compiler_cache_dir));
+}
+
+TEST(LiteRtUtilTest, CreateEnvironment_Npu_CompilerCacheDirIsCacheDir) {
+  const std::string model_path = (std::filesystem::path(::testing::TempDir()) /
+                                  "models" / "model.litertlm")
+                                     .string();
+  const std::string cache_dir = ::testing::TempDir();
+  ASSERT_OK_AND_ASSIGN(auto compiler_cache_dir,
+                       GetNpuCompilerCacheDir(model_path, cache_dir));
+#if !defined(LITERT_DISABLE_NPU)
+  EXPECT_THAT(compiler_cache_dir, ::testing::Optional(cache_dir));
+#else
+  EXPECT_EQ(compiler_cache_dir, std::nullopt);
+#endif
+}
+
+TEST(LiteRtUtilTest, CreateEnvironment_Npu_CompilerCacheDirDefaultsToModelDir) {
+  const std::filesystem::path model_path =
+      std::filesystem::path(::testing::TempDir()) / "model.litertlm";
+  ASSERT_OK_AND_ASSIGN(auto compiler_cache_dir,
+                       GetNpuCompilerCacheDir(model_path.string(), ""));
+#if !defined(LITERT_DISABLE_NPU)
+  EXPECT_THAT(compiler_cache_dir,
+              ::testing::Optional(model_path.parent_path().string()));
+#else
+  EXPECT_EQ(compiler_cache_dir, std::nullopt);
+#endif
+}
+
+TEST(LiteRtUtilTest, CreateEnvironment_Npu_NoCompilerCacheWhenCacheIsOff) {
+  const std::string model_path =
+      (std::filesystem::path(::testing::TempDir()) / "model.litertlm").string();
+  for (absl::string_view cache_dir : {":nocache", ":memory"}) {
+    ASSERT_OK_AND_ASSIGN(auto compiler_cache_dir,
+                         GetNpuCompilerCacheDir(model_path, cache_dir));
+    EXPECT_EQ(compiler_cache_dir, std::nullopt) << cache_dir;
+  }
+  // A model directory that cannot be written is not used either.
+  ASSERT_OK_AND_ASSIGN(
+      auto compiler_cache_dir,
+      GetNpuCompilerCacheDir("/nonexistent/model.litertlm", ""));
+  EXPECT_EQ(compiler_cache_dir, std::nullopt);
+}
+
 TEST(LiteRtUtilTest,
      CreateEnvironment_NpuGenericCompilerPlugin_AppliesMagicNumbers) {
   // This model embeds a magic number for the context length.

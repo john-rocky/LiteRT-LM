@@ -121,9 +121,9 @@ ABSL_FLAG(bool, disable_weight_cache, false,
           "Disable only the weight cache. Applies to both CPU and GPU.");
 ABSL_FLAG(bool, disable_gpu_program_cache, false,
           "Disable only the program cache. GPU path only.");
-ABSL_FLAG(
-    std::string, cache_dir, "",
-    "Directory for cache. Use ':memory' for in-memory cache. CPU path only");
+ABSL_FLAG(std::string, cache_dir, "",
+          "Directory for cache files, including the NPU compiler cache. Use "
+          "':memory' for in-memory cache.");
 ABSL_FLAG(std::string, preferred_device_substr, "",
           "Preferred WebGPU device name substring, case-insensitive. "
           "If not empty, the adapter which the device name contains the "

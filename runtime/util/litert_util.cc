@@ -37,6 +37,7 @@
 #include "runtime/executor/magic_number_configs_helper.h"
 #include "runtime/executor/vision/vision_executor_settings.h"
 #include "runtime/proto/llm_metadata.pb.h"
+#include "runtime/util/file_util.h"
 #include "runtime/util/litert_lm_loader.h"
 #include "runtime/util/logging.h"
 #include "runtime/util/scoped_file.h"
@@ -89,6 +90,30 @@ LibDirResult ResolveLibraryDir(
   return {library_dir, should_set_path, from_settings};
 }
 
+// Returns the directory for LiteRT's NPU compiler cache, or an empty string if
+// the compiled model should not be cached. It follows the executor's cache
+// directory: ":nocache" and ":memory" turn it off, and an empty cache directory
+// means the model's directory, as for the CPU and GPU caches.
+std::string ResolveCompilerCacheDir(
+    const ExecutorSettingsBase& main_executor_settings) {
+  const std::string& cache_dir = main_executor_settings.GetCacheDir();
+  if (cache_dir == ":nocache" || cache_dir == ":memory") {
+    return "";
+  }
+  std::string dir = cache_dir;
+  if (dir.empty()) {
+    std::string model_path(
+        main_executor_settings.GetModelAssets().GetPath().value_or(""));
+    dir = std::filesystem::path(model_path).parent_path().string();
+  }
+  // LiteRT fails the model load if it cannot write a new cache entry, so only a
+  // writable directory is used.
+  if (!IsDirectoryWritable(dir)) {
+    return "";
+  }
+  return dir;
+}
+
 void PopulateNpuOptions(
     Backend backend,
     const std::optional<VisionExecutorSettings>& vision_settings,
@@ -125,6 +150,16 @@ void PopulateNpuOptions(
       }
     } else {
       ABSL_VLOG(1) << "No valid library path provided.";
+    }
+
+    // With a compiler cache, LiteRT saves the model compiled on the device and
+    // loads it on the next run instead of compiling the model again.
+    std::string cache_dir = ResolveCompilerCacheDir(main_executor_settings);
+    if (!cache_dir.empty()) {
+      env_options.push_back(::litert::EnvironmentOptions::Option{
+          ::litert::EnvironmentOptions::Tag::kCompilerCacheDir,
+          cache_dir.c_str()});
+      ABSL_VLOG(1) << "Setting compiler cache dir: " << cache_dir;
     }
   }
 #endif
