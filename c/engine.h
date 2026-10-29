@@ -1754,7 +1754,8 @@ LITERT_LM_C_API_EXPORT
 LiteRtLmStatusCode litert_lm_benchmark_info_get_time_to_first_token(
     const LiteRtLmBenchmarkInfo* benchmark_info, double* out_seconds);
 
-// Returns the total initialization time in seconds.
+// Returns the total initialization time in seconds: the time to create the
+// engine. Session and conversation creation are not included.
 //
 // @param benchmark_info The benchmark info object.
 // @param out_seconds On success, receives the total initialization time in
@@ -1765,7 +1766,8 @@ LiteRtLmStatusCode litert_lm_benchmark_info_get_time_to_first_token(
 //
 // Added in version 0.1.0.
 // Changed in version 1.0.0: returns a status code; the value is returned
-// through out_seconds.
+// through out_seconds, and it is the engine creation time only (it added up
+// every init phase before).
 LITERT_LM_C_API_EXPORT
 LiteRtLmStatusCode litert_lm_benchmark_info_get_total_init_time_in_second(
     const LiteRtLmBenchmarkInfo* benchmark_info, double* out_seconds);

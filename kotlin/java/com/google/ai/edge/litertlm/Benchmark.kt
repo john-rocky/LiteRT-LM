@@ -18,7 +18,7 @@ package com.google.ai.edge.litertlm
 /**
  * Data class to hold benchmark information.
  *
- * @property initTimeInSecond The time in seconds to initialize the engine and the conversation.
+ * @property initTimeInSecond The time in seconds to initialize the engine.
  * @property timeToFirstTokenInSecond The time in seconds to the first token.
  * @property lastPrefillTokenCount The number of tokens in the last prefill. Returns 0 if there was
  *   no prefill.

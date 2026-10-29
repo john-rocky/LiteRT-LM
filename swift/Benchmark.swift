@@ -19,7 +19,7 @@ import CLiteRTLM
 /// Data struct to hold benchmark information. Note that this is an experimental API and may change
 /// in the future.
 public struct BenchmarkInfo {
-  /// The time in seconds to initialize the engine and the conversation.
+  /// The time in seconds to initialize the engine.
   public let initTimeInSecond: Double
 
   /// The time in seconds to the first token.
