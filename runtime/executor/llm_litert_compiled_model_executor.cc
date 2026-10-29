@@ -1740,13 +1740,15 @@ absl::Status LlmLiteRtCompiledModelExecutorBase::RestoreContext(
   llm_context_ = std::move(context_data);
   mtp_primed_ = false;
 
-  // We can keep our kv cache buffers if this is the first step. This lets us
-  // restore from LlmContexts at step 0 with an empty kv cache.
+  // A context at step 0 has no state of its own: reset the state buffers
+  // instead of restoring them.
   if (llm_context_->runtime_state().current_step > 0) {
     auto restored_state = std::move(
         static_cast<LlmProcessedContext&>(llm_context_->processed_context())
             .state());
     ABSL_RETURN_IF_ERROR(RestoreState(std::move(restored_state)));
+  } else {
+    ABSL_RETURN_IF_ERROR(Reset());
   }
 
   force_prepare_needed_ = true;
@@ -1950,6 +1952,10 @@ absl::Status LlmLiteRtCompiledModelExecutorBase::SetCurrentStep(int new_step) {
     llm_context_->runtime_state().current_step = new_step;
     return absl::OkStatus();
   }
+  if (new_step == 0) {
+    // Rewinding to the start begins a new sequence.
+    return Reset();
+  }
   RET_CHECK_LE(new_step, max_step).SetCode(absl::StatusCode::kInvalidArgument)
       << "New step cannot be greater than the max step: " << max_step;
   if (new_step < 0) {
@@ -1966,6 +1972,16 @@ absl::Status LlmLiteRtCompiledModelExecutorBase::SetCurrentStep(int new_step) {
 absl::Status LlmLiteRtCompiledModelExecutorBase::Reset() {
   llm_context_->runtime_state().current_step = 0;
   mtp_primed_ = false;
+  // Zero out every state buffer, so that a new sequence does not continue from
+  // the previous one. The KV cache alone could be kept, since its entries past
+  // the current step are masked by position, but a linear attention state is a
+  // running summary of every token processed so far.
+  if (state_ != nullptr) {
+    ABSL_RETURN_IF_ERROR(state_->Clear());
+  }
+  if (decode_state_ != nullptr) {
+    ABSL_RETURN_IF_ERROR(decode_state_->Clear());
+  }
   return absl::OkStatus();
 }
 
