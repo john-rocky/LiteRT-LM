@@ -251,6 +251,106 @@ final class ToolTests: XCTestCase {
     XCTAssertEqual(result as? [String: Int], ["a": 1, "b": 2])
   }
 
+  // MARK: - OpenApiTool
+
+  func testToolsDescriptionConversion_openApiToolKeptAsWritten() throws {
+    let toolManager = try ToolManager(tools: [AddNumbersOpenApiTool()])
+    XCTAssertEqual(
+      toolManager.toolsJsonDescription,
+      #"[{"type":"function","function":"# + AddNumbersOpenApiTool.description + "}]")
+  }
+
+  func testToolsDescriptionConversion_bothKindsInListOrder() throws {
+    let sumList = """
+      {"type":"function","function":{"name":"sum_list","description":"Sums a list of integers.","parameters":{"type":"object","properties":{"numbers":{"type":"array","items":{"type":"integer"},"description":"List of integers to sum."}},"required":["numbers"]}}}
+      """
+    let addNumbers = #"{"type":"function","function":"# + AddNumbersOpenApiTool.description + "}"
+    try assertJsonEqual(
+      actual: try ToolManager(tools: [SumListTool(), AddNumbersOpenApiTool()]).toolsJsonDescription,
+      expected: "[\(sumList),\(addNumbers)]")
+    try assertJsonEqual(
+      actual: try ToolManager(tools: [AddNumbersOpenApiTool(), SumListTool()]).toolsJsonDescription,
+      expected: "[\(addNumbers),\(sumList)]")
+  }
+
+  func testToolManager_invalidOpenApiToolDescription() {
+    for description in ["not json", #"["addNumbers"]"#, #"{"description":"No name."}"#] {
+      XCTAssertThrowsError(
+        try ToolManager(tools: [DescriptionOnlyOpenApiTool(description: description)])
+      ) { error in
+        guard case .tool(.invalidDescription)? = error as? LiteRTLMError else {
+          return XCTFail("Expected LiteRTLMError.tool(.invalidDescription), got \(error)")
+        }
+      }
+    }
+  }
+
+  func testToolDescriptionJsonString_isTheSchemasFunction() throws {
+    let tool = SumListTool()
+    let description = try JSONSerialization.jsonObject(
+      with: Data(tool.getToolDescriptionJsonString().utf8))
+    XCTAssertEqual(description as? NSDictionary, tool.getSchema()["function"] as? NSDictionary)
+    // `ToolManager` wraps it as it wraps an `OpenApiTool`'s description, and an array literal of
+    // `Tool`s still takes the initializer that does not throw.
+    let json = ToolManager(tools: [tool]).toolsJsonDescription
+    XCTAssertTrue(json.hasPrefix(#"[{"type":"function","function":{"#), json)
+    try assertJsonEqual(
+      actual: json,
+      expected: #"[{"type":"function","function":"# + tool.getToolDescriptionJsonString() + "}]")
+  }
+
+  func testToolManager_otherKindOfTool() async throws {
+    // A tool that conforms to `ToolProtocol` directly goes in the same list as the two kinds.
+    let toolManager = try ToolManager(
+      tools: [SumListTool(), AddNumbersOpenApiTool(), UppercaseTool()])
+    let uppercase = #"{"type":"function","function":"# + UppercaseTool.description + "}"
+    XCTAssertTrue(
+      toolManager.toolsJsonDescription.hasSuffix(",\(uppercase)]"),
+      toolManager.toolsJsonDescription)
+    let result = try await toolManager.execute(name: "uppercase", arguments: ["text": "tokyo"])
+    XCTAssertEqual(result as? [String: String], ["text": "TOKYO"])
+  }
+
+  func testToolManagerExecute_openApiTool() async throws {
+    // The name is used as written: unlike a `Tool`'s, it is not converted to snake_case.
+    let toolManager = try ToolManager(tools: [AddNumbersOpenApiTool()])
+    let result = try await toolManager.execute(
+      name: "addNumbers", arguments: ["numbers": [3.0, 4.5, 6.0]])
+    XCTAssertEqual(result as? String, #"{"sum":13.5}"#)
+  }
+
+  func testToolManagerExecute_bothKindsInOneList() async throws {
+    let toolManager = try ToolManager(tools: [AddIntegersTool(), AddNumbersOpenApiTool()])
+    let sum = try await toolManager.execute(
+      name: "add_integers", arguments: ["first_int": 10, "second_int": 20])
+    XCTAssertEqual((sum as? [String: Int])?["sum"], 30)
+    let openApiSum = try await toolManager.execute(
+      name: "addNumbers", arguments: ["numbers": [3.0, 4.5, 6.0]])
+    XCTAssertEqual(openApiSum as? String, #"{"sum":13.5}"#)
+  }
+
+  func testToolManagerExecute_openApiToolError() async throws {
+    let toolManager = try ToolManager(
+      tools: [DescriptionOnlyOpenApiTool(description: #"{"name":"fail"}"#)])
+    do {
+      _ = try await toolManager.execute(name: "fail", arguments: [:])
+      XCTFail("Expected the tool's error, but nothing was thrown.")
+    } catch is DescriptionOnlyOpenApiTool.Failure {
+      // Expected error
+    }
+  }
+
+  func testConversationConfigTakesBothKindsInTools() {
+    // An array typed `[Tool]` still passes.
+    let typed: [Tool] = [SumListTool()]
+    XCTAssertTrue(ConversationConfig(tools: typed).tools.first is SumListTool)
+
+    let config = ConversationConfig(tools: [SumListTool(), AddNumbersOpenApiTool()])
+    XCTAssertEqual(config.tools.count, 2)
+    XCTAssertTrue(config.tools[0] is SumListTool)
+    XCTAssertTrue(config.tools[1] is AddNumbersOpenApiTool)
+  }
+
   // MARK: - Helpers
 
   private func assertJsonEqual(
@@ -412,5 +512,44 @@ struct MapReturnTool: Tool {
   static let description = "A tool that returns a map."
   func run() async throws -> Any {
     return ["a": 1, "b": 2]
+  }
+}
+
+struct AddNumbersOpenApiTool: OpenApiTool {
+  // Keys in the order the model should read them, which is not alphabetical.
+  static let description = """
+    {"name":"addNumbers","description":"Add all numbers.","parameters":{"type":"object","properties":{"numbers":{"type":"array","items":{"type":"number"},"description":"The list of numbers to sum."}},"required":["numbers"]}}
+    """
+
+  func getToolDescriptionJsonString() -> String { Self.description }
+
+  func execute(paramsJsonString: String) async throws -> String {
+    let params =
+      try JSONSerialization.jsonObject(with: Data(paramsJsonString.utf8)) as? [String: Any]
+    let numbers = params?["numbers"] as? [Double] ?? []
+    return #"{"sum":\#(numbers.reduce(0, +))}"#
+  }
+}
+
+struct DescriptionOnlyOpenApiTool: OpenApiTool {
+  struct Failure: Error {}
+
+  let description: String
+
+  func getToolDescriptionJsonString() -> String { description }
+
+  func execute(paramsJsonString: String) async throws -> String { throw Failure() }
+}
+
+/// Neither a `Tool` nor an `OpenApiTool`: another way of writing a tool.
+struct UppercaseTool: ToolProtocol {
+  static let description = """
+    {"name":"uppercase","description":"Uppercases a text.","parameters":{"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}}
+    """
+
+  func getToolDescriptionJsonString() -> String { Self.description }
+
+  func execute(arguments: [String: Any]) async throws -> Any {
+    ["text": (arguments["text"] as? String ?? "").uppercased()]
   }
 }

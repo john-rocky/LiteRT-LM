@@ -268,8 +268,9 @@ public struct ConversationConfig {
   // The initial messages to populate the conversation history.
   public let initialMessages: [Message]
 
-  // The list of tool instances to be used in the conversation.
-  public let tools: [Tool]
+  // The list of tools to be used in the conversation: `Tool` instances, `OpenApiTool`s, or any
+  // other `ToolProtocol`.
+  public let tools: [ToolProtocol]
 
   // Configuration for the sampling process.
   // If `nil`, then uses the engine's default values.
@@ -304,7 +305,8 @@ public struct ConversationConfig {
   /// - Parameters:
   ///   - systemMessage: The system message to be used in the conversation.
   ///   - initialMessages: The initial messages to populate the conversation history.
-  ///   - tools: The list of tool instances to be used in the conversation.
+  ///   - tools: The list of tools to be used in the conversation, in the order the model reads
+  ///     them: `Tool` instances, `OpenApiTool`s, or any other `ToolProtocol`.
   ///   - samplerConfig: Configuration for the sampling process. If `nil`, then uses the engine's
   ///     default values.
   ///   - loraPath: The file path to the Text LoRA weights file.
@@ -324,7 +326,7 @@ public struct ConversationConfig {
   public init(
     systemMessage: Message? = nil,
     initialMessages: [Message] = [],
-    tools: [Tool] = [],
+    tools: [ToolProtocol] = [],
     samplerConfig: SamplerConfig? = nil,
     loraPath: String? = nil,
     audioLoraPath: String? = nil,
@@ -369,7 +371,7 @@ public struct ConversationConfig {
   public init(
     systemMessage: Message? = nil,
     initialMessages: [Message] = [],
-    tools: [Tool] = [],
+    tools: [ToolProtocol] = [],
     samplerConfig: SamplerConfig? = nil,
     loraPath: String? = nil,
     audioLoraPath: String? = nil,
