@@ -1909,15 +1909,15 @@ absl::Status LlmLiteRtCompiledModelExecutorBase::SetCurrentStep(int new_step) {
 absl::Status LlmLiteRtCompiledModelExecutorBase::Reset() {
   llm_context_->runtime_state().current_step = 0;
   mtp_primed_ = false;
-  // Zero out every state buffer, so that a new sequence does not continue from
-  // the previous one. The KV cache alone could be kept, since its entries past
-  // the current step are masked by position, but a linear attention state is a
-  // running summary of every token processed so far.
+  // Zero out the linear attention state, a running summary of every token
+  // processed so far, so that a new sequence does not continue from the
+  // previous one. The KV cache is kept: its entries past the current step are
+  // masked by position.
   if (state_ != nullptr) {
-    ABSL_RETURN_IF_ERROR(state_->Clear());
+    ABSL_RETURN_IF_ERROR(state_->ClearLinearAttentionState());
   }
   if (decode_state_ != nullptr) {
-    ABSL_RETURN_IF_ERROR(decode_state_->Clear());
+    ABSL_RETURN_IF_ERROR(decode_state_->ClearLinearAttentionState());
   }
   return absl::OkStatus();
 }

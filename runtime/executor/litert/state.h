@@ -80,6 +80,9 @@ class LitertState : public StateInterface {
 
   absl::Status Clear() override;
 
+  // Zeroes out the buffers of type TYPE_LINEAR_ATTENTION in both banks.
+  absl::Status ClearLinearAttentionState() override;
+
   // Returns true if all state buffers are backed by host memory.
   bool IsHostMemory() const;
 

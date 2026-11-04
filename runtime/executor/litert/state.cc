@@ -372,6 +372,22 @@ absl::Status LitertState::Clear() {
   return absl::OkStatus();
 }
 
+absl::Status LitertState::ClearLinearAttentionState() {
+  for (auto& [_, state_buffer] : bank_1_state_buffers_) {
+    if (state_buffer.type == proto::StateBuffer::TYPE_LINEAR_ATTENTION) {
+      LITERT_RETURN_IF_ERROR(state_buffer.buffer.Clear());
+    }
+  }
+  if (bank_2_state_buffers_.has_value()) {
+    for (auto& [_, state_buffer] : *bank_2_state_buffers_) {
+      if (state_buffer.type == proto::StateBuffer::TYPE_LINEAR_ATTENTION) {
+        LITERT_RETURN_IF_ERROR(state_buffer.buffer.Clear());
+      }
+    }
+  }
+  return absl::OkStatus();
+}
+
 absl::Status LitertState::Resize(CompiledModel& compiled_model,
                                  absl::string_view signature_name,
                                  int num_entries) {

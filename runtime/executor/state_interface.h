@@ -69,6 +69,10 @@ class StateInterface {
   // perform the operation asynchronously if the underlying buffers support
   // asynchronous operations.
   virtual absl::Status Clear() = 0;
+
+  // Zeroes out the linear attention state buffers and keeps the KV cache
+  // buffers. By default, zeroes out all the buffers.
+  virtual absl::Status ClearLinearAttentionState() { return Clear(); }
 };
 
 }  // namespace litert::lm
