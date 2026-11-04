@@ -434,6 +434,29 @@ class ConversationTests: XCTestCase {
     XCTAssertTrue(rendered.contains("You are a helpful assistant"))
   }
 
+  func testCreateConversationWithBothKindsOfTools() async throws {
+    let template = """
+      {%- for tool in tools -%}{{- tool | tojson -}}{%- endfor -%}
+      {%- for message in messages -%}{{- message.content[0].text -}}{%- endfor -%}
+      """
+    let config = ConversationConfig(
+      systemMessage: Message("You are a helpful assistant."),
+      tools: [WeatherOpenApiTool(), TimeTool()], chatTemplate: template)
+    let conversation = try await self.engine.createConversation(with: config)
+
+    let rendered = try conversation.renderPrefaceIntoString()
+    // The OpenApiTool comes first, so the first of each key is in its description, whose keys
+    // keep the order they are written in.
+    let keys = ["\"type\"", "\"function\"", "\"name\"", "\"description\"", "\"parameters\""]
+    let positions = try keys.map { try XCTUnwrap(rendered.range(of: $0), "\($0) in \(rendered)") }
+    XCTAssertEqual(
+      positions.map(\.lowerBound), positions.map(\.lowerBound).sorted(), "key order: \(rendered)")
+    let weather = try XCTUnwrap(rendered.range(of: "get_weather"), rendered)
+    let time = try XCTUnwrap(rendered.range(of: "get_time"), rendered)
+    XCTAssertLessThan(weather.lowerBound, time.lowerBound, "list order: \(rendered)")
+    XCTAssertTrue(rendered.contains("You are a helpful assistant."))
+  }
+
   func testSendMessageWithRepetitionPenalty() async throws {
     let conversation = try await self.engine.createConversation(with: ConversationConfig())
     XCTAssertTrue(conversation.isAlive)
@@ -695,4 +718,21 @@ class ConversationTests: XCTestCase {
     let response = try await cloned.sendMessage(Message("world"), maxOutputTokens: 2)
     XCTAssertFalse(response.contents.isEmpty)
   }
+}
+
+struct WeatherOpenApiTool: OpenApiTool {
+  let description = """
+    {"name": "get_weather", "description": "Get the weather for a city.", "parameters": {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]}}
+    """
+
+  func getToolDescriptionJsonString() -> String { description }
+
+  func execute(paramsJsonString: String) async throws -> String { #"{"weather": "sunny"}"# }
+}
+
+struct TimeTool: Tool {
+  static let name = "get_time"
+  static let description = "Get the current time."
+
+  func run() async throws -> Any { "12:00" }
 }

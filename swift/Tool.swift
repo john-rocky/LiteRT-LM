@@ -176,6 +176,32 @@ public struct ToolParam<Value: ToolParameterValue>: Decodable, ToolParamProtocol
   }
 }
 
+/// What `ToolManager` needs of a tool: a description for the model and a way to execute the tool.
+/// `ConversationConfig.tools` takes any tools that conform, in one list.
+///
+/// To write a tool, conform to `Tool` or `OpenApiTool`: they provide `execute(arguments:)`, and
+/// `Tool` also provides `getToolDescriptionJsonString()`. Another way of writing tools conforms to
+/// this protocol, and `ToolManager` handles it as it handles those two.
+public protocol ToolProtocol {
+  /// Returns the tool's description as a JSON object in the OpenAPI format, with the keys:
+  /// - name: Required. The name of the tool.
+  /// - description: Optional. A brief description of the function.
+  /// - parameters: Optional. Describes the parameters to this function.
+  ///
+  /// `ToolManager` passes the string on as written, so its keys keep their order.
+  func getToolDescriptionJsonString() -> String
+
+  /// Executes the tool with the arguments of a call from the model.
+  ///
+  /// The conversation calls this only when `ConversationConfig.automaticToolCalling` is true;
+  /// otherwise the tool calls are returned to the caller.
+  ///
+  /// - Parameter arguments: The arguments, keyed by parameter name.
+  /// - Returns: The result for the model: a String, a number, a Bool, or an array or dictionary of
+  ///   them. `ToolManager` converts any other value to a String.
+  func execute(arguments: [String: Any]) async throws -> Any
+}
+
 /// Example of how to define tools:
 /// - Adopt the `Tool` protocol to define a struct/class as a tool.
 /// - Use `@ToolParam` to define the parameters of the tool.
@@ -208,7 +234,7 @@ public struct ToolParam<Value: ToolParameterValue>: Decodable, ToolParamProtocol
 ///  A protocol a struct/class must conform to be used as a tool by the LiteRT-LM model.
 ///
 ///  - SeeAlso: `ToolParam` for defining parameters of the tool.
-public protocol Tool: Decodable {
+public protocol Tool: ToolProtocol, Decodable {
   /// The unique name of the tool.
   static var name: String { get }
   /// A description of what the tool does.
@@ -270,6 +296,118 @@ extension Tool {
     }
 
     return schema
+  }
+
+  /// Returns the `function` object of `getSchema()` as a JSON string.
+  public func getToolDescriptionJsonString() -> String {
+    // Use the instance to generate the schema via Mirror
+    guard let function = getSchema()["function"],
+      let data = try? JSONSerialization.data(withJSONObject: function, options: []),
+      let jsonString = String(data: data, encoding: .utf8)
+    else {
+      return "{}"
+    }
+    return jsonString
+  }
+
+  /// Executes the tool on a new instance, decoded from the arguments, with the defaults for any
+  /// the model left out. The instance this is called on is used only for its type.
+  public func execute(arguments: [String: Any]) async throws -> Any {
+    // 1. Create a template instance to access default values.
+    // This allows us to handle optional parameters that the model might omit from its output.
+    // Swift Codable requires all keys to be present.
+    // By manually merging defaults, we ensure decoding succeeds.
+    let defaultTool = Self.init()
+    var defaults: [String: Any] = [:]
+
+    // 2. Reflect to extract default values.
+    let mirror = Mirror(reflecting: defaultTool)
+    let useSnakeCase = ExperimentalFlags.convertCamelToSnakeCaseInToolDescription
+
+    for child in mirror.children {
+      guard let label = child.label else { continue }
+
+      // Clean the property wrapper name (remove _ prefix and handle snake_case)
+      let paramName = label.cleanPropertyLabel(useSnakeCase: useSnakeCase)
+
+      if let toolParam = child.value as? ToolParamProtocol {
+        if let defaultValue = toolParam.wrappedValueAny {
+          defaults[paramName] = defaultValue
+        } else if !toolParam.isRequired {
+          // If it's not required (i.e. optional or has default),
+          // but currently nil, we should still provide a null value
+          // so the decoder doesn't fail on missing key.
+          defaults[paramName] = NSNull()
+        }
+      }
+    }
+
+    // 3. Merge provided arguments over the defaults.
+    // The `arguments` take precedence.
+    let mergedArgs = defaults.merging(arguments) { (_, new) in new }
+
+    let argsData = try JSONSerialization.data(withJSONObject: mergedArgs)
+
+    let decoder = JSONDecoder()
+    if useSnakeCase {
+      decoder.keyDecodingStrategy = .convertFromSnakeCase
+    }
+
+    // Create a new tool instance from the JSON arguments.
+    // This populates the @ToolParam properties automatically.
+    let toolInstance = try decoder.decode(Self.self, from: argsData)
+
+    // Run the tool
+    return try await toolInstance.run()
+  }
+}
+
+/// A tool defined by its OpenAPI description rather than by a `Tool` type.
+///
+/// Use this when the description already exists as JSON, or when the tools are values rather than
+/// types, such as tools an app builds at run time. The description and the arguments are JSON
+/// strings, so any JSON library can be used: implement `getToolDescriptionJsonString()`, a
+/// `ToolProtocol` requirement, and `execute(paramsJsonString:)`.
+///
+/// ```swift
+/// struct AdditionTool: OpenApiTool {
+///   func getToolDescriptionJsonString() -> String {
+///     """
+///     {"name": "addition", "description": "Add all numbers.",
+///      "parameters": {"type": "object",
+///        "properties": {"numbers": {"type": "array", "items": {"type": "number"},
+///          "description": "The list of numbers to sum."}},
+///        "required": ["numbers"]}}
+///     """
+///   }
+///
+///   func execute(paramsJsonString: String) async throws -> String {
+///     // Parse paramsJsonString with the JSON library of your choice and run the tool.
+///     return #"{"sum": 13.5}"#
+///   }
+/// }
+/// ```
+///
+/// Pass instances in `ConversationConfig.tools`, in the same list as any `Tool`.
+public protocol OpenApiTool: ToolProtocol, Sendable {
+  /// Executes the tool and returns the result as a JSON string.
+  ///
+  /// The conversation calls this only when `ConversationConfig.automaticToolCalling` is true;
+  /// otherwise the tool calls are returned to the caller.
+  ///
+  /// - Parameter paramsJsonString: A JSON object whose keys are the parameter names, for example
+  ///   `{"numbers":[3.0,4.5,6.0]}`.
+  /// - Returns: The result as a JSON string: a primitive value such as `13.5`, or an object such
+  ///   as `{"sum":13.5}`.
+  func execute(paramsJsonString: String) async throws -> String
+}
+
+extension OpenApiTool {
+  /// Executes the tool through `execute(paramsJsonString:)`, with the arguments as a JSON string,
+  /// and returns the JSON string it returns.
+  public func execute(arguments: [String: Any]) async throws -> Any {
+    let params = try JSONSerialization.data(withJSONObject: arguments)
+    return try await execute(paramsJsonString: String(decoding: params, as: UTF8.self))
   }
 }
 

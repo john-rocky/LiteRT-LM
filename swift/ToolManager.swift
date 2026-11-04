@@ -17,9 +17,8 @@ import Foundation
 /// Manages the discovery, schema generation, and execution of tools.
 public final class ToolManager: Sendable {
 
-  /// A map of tool names to their corresponding Swift Types.
-  /// We store the `Type` so we can instantiate new copies via Codable.
-  private let toolRegistry: [String: Tool.Type]
+  /// A map of tool names to the tools.
+  private let toolRegistry: [String: ToolProtocol]
 
   /// The JSON schema string representing all registered tools.
   /// This is computed once during initialization.
@@ -29,30 +28,41 @@ public final class ToolManager: Sendable {
   ///
   /// - Parameter tools: A list of instantiated tools (e.g. `[GetWeatherTool()]`).
   ///   These instances are used *only* for schema generation. Execution uses new instances.
-  public init(tools: [Tool]) {
-    var registry: [String: Tool.Type] = [:]
-    var schemaList: [[String: Any]] = []
-    let useSnakeCase = ExperimentalFlags.convertCamelToSnakeCaseInToolDescription
+  public convenience init(tools: [Tool]) {
+    // A `Tool`'s own description, built from its type, always has a `name` string, so this does
+    // not trap for it. Only a `Tool` that overrides `getToolDescriptionJsonString()` with a
+    // description `init(tools: [ToolProtocol])` rejects traps here.
+    try! self.init(tools: tools as [ToolProtocol])
+  }
 
+  /// Initializes the ToolManager with tools of any kind: `Tool` instances, `OpenApiTool`s, and any
+  /// other `ToolProtocol`.
+  ///
+  /// - Parameter tools: The tools, in the order the model reads them. Each tool's description is
+  ///   used as written, inside the `{"type": "function", "function": ...}` object the native
+  ///   library expects.
+  /// - Throws: `LiteRTLMError.tool(.invalidDescription)` if a tool's description is not a JSON
+  ///   object with a `name` string.
+  public init(tools: [ToolProtocol]) throws {
+    var toolRegistry: [String: ToolProtocol] = [:]
+    var wrapped: [String] = []
     for tool in tools {
-      let name = type(of: tool).name
-      let toolNameInModel = useSnakeCase ? name.camelToSnakeCase() : name
-      registry[toolNameInModel] = type(of: tool)
-
-      // Use the provided instance to generate the schema via Mirror
-      schemaList.append(tool.getSchema())
+      let description = tool.getToolDescriptionJsonString()
+      guard
+        let object = try? JSONSerialization.jsonObject(with: Data(description.utf8))
+          as? [String: Any]
+      else {
+        throw LiteRTLMError.tool(.invalidDescription("Not a JSON object: \(description)"))
+      }
+      guard let name = object["name"] as? String else {
+        throw LiteRTLMError.tool(.invalidDescription("No \"name\" string: \(description)"))
+      }
+      toolRegistry[name] = tool
+      // Concatenated, not re-serialized: JSONSerialization does not keep the key order.
+      wrapped.append(#"{"type":"function","function":"# + description + "}")
     }
-
-    self.toolRegistry = registry
-
-    // Serialize the schema list to a JSON string
-    if let data = try? JSONSerialization.data(withJSONObject: schemaList, options: []),
-      let jsonString = String(data: data, encoding: .utf8)
-    {
-      self.toolsJsonDescription = jsonString
-    } else {
-      self.toolsJsonDescription = "[]"
-    }
+    self.toolRegistry = toolRegistry
+    self.toolsJsonDescription = "[" + wrapped.joined(separator: ",") + "]"
   }
 
   /// Executes a tool based on the name and JSON arguments provided by the model.
@@ -61,60 +71,14 @@ public final class ToolManager: Sendable {
   ///   - name: The name of the tool to execute.
   ///   - arguments: The arguments as a dictionary.
   /// - Returns: The result of the tool execution. This will be a JSON-compatible type (String, Number, Bool, Array, Dictionary).
+  ///   For an `OpenApiTool`, it is the JSON string its `execute(paramsJsonString:)` returned.
   public func execute(name: String, arguments: [String: Any]) async throws -> Any {
-    guard let ToolType = toolRegistry[name] else {
+    guard let tool = toolRegistry[name] else {
       throw LiteRTLMError.tool(.notFound(name: name))
     }
 
-    // 1. Create a template instance to access default values.
-    // This allows us to handle optional parameters that the model might omit from its output.
-    // Swift Codable requires all keys to be present.
-    // By manually merging defaults, we ensure decoding succeeds.
-    let defaultTool = ToolType.init()
-    var defaults: [String: Any] = [:]
-
-    // 2. Reflect to extract default values.
-    let mirror = Mirror(reflecting: defaultTool)
-    let useSnakeCase = ExperimentalFlags.convertCamelToSnakeCaseInToolDescription
-
-    for child in mirror.children {
-      guard let label = child.label else { continue }
-
-      // Clean the property wrapper name (remove _ prefix and handle snake_case)
-      let paramName = label.cleanPropertyLabel(useSnakeCase: useSnakeCase)
-
-      if let toolParam = child.value as? ToolParamProtocol {
-        if let defaultValue = toolParam.wrappedValueAny {
-          defaults[paramName] = defaultValue
-        } else if !toolParam.isRequired {
-          // If it's not required (i.e. optional or has default),
-          // but currently nil, we should still provide a null value
-          // so the decoder doesn't fail on missing key.
-          defaults[paramName] = NSNull()
-        }
-      }
-    }
-
-    // 3. Merge provided arguments over the defaults.
-    // The `arguments` take precedence.
-    let mergedArgs = defaults.merging(arguments) { (_, new) in new }
-
-    let argsData = try JSONSerialization.data(withJSONObject: mergedArgs)
-
-    let decoder = JSONDecoder()
-    if useSnakeCase {
-      decoder.keyDecodingStrategy = .convertFromSnakeCase
-    }
-
-    // Create a new tool instance from the JSON arguments.
-    // This populates the @ToolParam properties automatically.
-    let toolInstance = try decoder.decode(ToolType, from: argsData)
-
-    // Run the tool
-    let result = try await toolInstance.run()
-
     // Normalize the result to ensure it is strictly JSON-compatible (mimicking Android logic)
-    return normalizeResult(result)
+    return normalizeResult(try await tool.execute(arguments: arguments))
   }
 
   /// Helper to recursively convert any result into a JSON-Serialization friendly format.
