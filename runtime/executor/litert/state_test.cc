@@ -288,6 +288,47 @@ TEST_F(LitertStateTest, CopyContentsFromRejectsMismatchedAllocationPolicy) {
               StatusIs(absl::StatusCode::kInternal));
 }
 
+TEST_F(LitertStateTest, ClearLinearAttentionStateKeepsKvCache) {
+  proto::ExecutorMetadata executor_metadata;
+  auto add_state_buffer = [&executor_metadata](absl::string_view name,
+                                               proto::StateBuffer::Type type) {
+    proto::StateBuffer* state_buffer =
+        executor_metadata.mutable_llm_executor_metadata()->add_state_buffers();
+    state_buffer->set_decode_input_name(name);
+    state_buffer->set_decode_output_name(name);
+    state_buffer->set_type(type);
+    return state_buffer;
+  };
+  add_state_buffer("kv_cache_k_0", proto::StateBuffer::TYPE_LINEAR_ATTENTION);
+  add_state_buffer("kv_cache_v_0", proto::StateBuffer::TYPE_GLOBAL_VALUE_CACHE)
+      ->set_sequence_axis(2);
+  ASSERT_NO_FATAL_FAILURE(SetUpKV(kTestStaticModelPath,
+                                  LitertState::AllocationPolicy::kPingPong,
+                                  /*batch_size=*/1, &executor_metadata));
+  // Each call swaps the banks, so two calls see both banks as inputs.
+  for (int i = 0; i < 2; ++i) {
+    ASSERT_OK_AND_ASSIGN(
+        auto buffers,
+        kv_cache_->GetStateBuffers(*compiled_model_, kDecodeSignatureRunner));
+    ASSERT_EQ(buffers.input_buffers.size(), 2u);
+    for (auto& [_, buffer] : buffers.input_buffers) {
+      ASSERT_NO_FATAL_FAILURE(FillBuffer(buffer, 7));
+    }
+  }
+
+  ASSERT_OK(kv_cache_->ClearLinearAttentionState());
+
+  for (int i = 0; i < 2; ++i) {
+    ASSERT_OK_AND_ASSIGN(
+        auto buffers,
+        kv_cache_->GetStateBuffers(*compiled_model_, kDecodeSignatureRunner));
+    ASSERT_NO_FATAL_FAILURE(
+        ExpectBufferFilledWith(buffers.input_buffers.at("kv_cache_k_0"), 0));
+    ASSERT_NO_FATAL_FAILURE(
+        ExpectBufferFilledWith(buffers.input_buffers.at("kv_cache_v_0"), 7));
+  }
+}
+
 #ifndef _WIN32
 TEST_F(LitertStateTest, CopyContentsFromRejectsMismatchedNumEntries) {
   ASSERT_NO_FATAL_FAILURE(SetUpKV(kTestDynamicModelPath,
