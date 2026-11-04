@@ -86,6 +86,7 @@ THREADED_EXECUTION_MANAGER_COMMON_DEPS = [
     "//runtime/executor:llm_executor_io_types",
     "//runtime/executor:vision_executor",
     "//runtime/executor:vision_executor_settings",
+    "//runtime/framework:thread_options",
     "//runtime/framework:threadpool",
     "//runtime/util:convert_tensor_buffer",
     "//runtime/util:executor_data_util",

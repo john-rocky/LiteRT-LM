@@ -14,6 +14,7 @@
 
 #include <errno.h>
 #include <pthread.h>
+#include <stddef.h>
 #include <string.h>
 #include <sys/syscall.h>
 #include <unistd.h>
@@ -74,7 +75,24 @@ WorkerThreadPthread::WorkerThreadPthread(ThreadPool* absl_nonnull pool,
     : WorkerThread(pool, name_prefix) {}
 
 absl::Status WorkerThreadPthread::Start() {
-  int res = pthread_create(&thread_, nullptr, ThreadBody, this);
+  pthread_attr_t attr;
+  int res = pthread_attr_init(&attr);
+  if (res != 0) {
+    return absl::ErrnoToStatus(
+        res, absl::StrCat("pthread_attr_init failed for pool ", name_prefix_));
+  }
+  const size_t stack_size = pool_.thread_options().stack_size();
+  if (stack_size != 0) {
+    res = pthread_attr_setstacksize(&attr, stack_size);
+    if (res != 0) {
+      ABSL_LOG(WARNING) << absl::ErrnoToStatus(
+          res, absl::StrCat("Using the system default stack size for pool ",
+                            name_prefix_, ". Failed to set it to ",
+                            stack_size));
+    }
+  }
+  res = pthread_create(&thread_, &attr, ThreadBody, this);
+  pthread_attr_destroy(&attr);
   if (res == 0) {
     return absl::OkStatus();
   }

@@ -14,7 +14,12 @@
 
 #include "runtime/framework/resource_management/execution_manager.h"
 
+#if defined(__APPLE__) || defined(__linux__)
+#include <pthread.h>
+#endif
+
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>  // NOLINT
 #include <fstream>
@@ -252,6 +257,44 @@ class ContextSwitchingFakeLlmExecutor : public FakeLlmExecutor {
   }
 };
 
+#if defined(__APPLE__) || defined(__linux__)
+size_t CurrentThreadStackSize() {
+#if defined(__APPLE__)
+  return pthread_get_stacksize_np(pthread_self());
+#else
+  pthread_attr_t attr;
+  pthread_getattr_np(pthread_self(), &attr);
+  void* stack_addr = nullptr;
+  size_t stack_size = 0;
+  pthread_attr_getstack(&attr, &stack_addr, &stack_size);
+  pthread_attr_destroy(&attr);
+  return stack_size;
+#endif
+}
+
+// A fake LLM executor that records the stack size of the thread running
+// Prefill.
+class StackSizeRecordingFakeLlmExecutor : public FakeLlmExecutor {
+ public:
+  StackSizeRecordingFakeLlmExecutor(
+      int vocab_size, const std::vector<std::vector<int>>& prefill_tokens_set,
+      const std::vector<std::vector<int>>& decode_tokens_set,
+      std::atomic<size_t>* stack_size)
+      : FakeLlmExecutor(vocab_size, prefill_tokens_set, decode_tokens_set),
+        stack_size_(stack_size) {}
+
+  using FakeLlmExecutor::Prefill;
+  absl::Status Prefill(const ExecutorInputs& inputs,
+                       const ExecutorPrefillParams& prefill_params) override {
+    *stack_size_ = CurrentThreadStackSize();
+    return FakeLlmExecutor::Prefill(inputs, prefill_params);
+  }
+
+ private:
+  std::atomic<size_t>* stack_size_;
+};
+#endif  // defined(__APPLE__) || defined(__linux__)
+
 class NonStreamingFakeAudioExecutor : public AudioExecutor {
  public:
   absl::StatusOr<ExecutorAudioData> Encode(
@@ -469,6 +512,37 @@ TEST_P(ExecutionManagerTest, AddPrefillTask) {
                             TaskState::kProcessing, TaskState::kDone));
   }
 }
+
+#if defined(__APPLE__) || defined(__linux__)
+TEST_P(ExecutionManagerTest, ThreadedPrefillRunsOnLargeStack) {
+  if (GetParam() != ExecutionManagerType::kThreaded) {
+    GTEST_SKIP() << "A serial manager runs on the caller's thread.";
+  }
+  std::atomic<size_t> stack_size = 0;
+  CreateExecutionManager(std::make_unique<StackSizeRecordingFakeLlmExecutor>(
+      kVocabSize, std::vector<std::vector<int>>{{1, 2, 3, -4}},
+      std::vector<std::vector<int>>{{4}}, &stack_size));
+  ASSERT_OK_AND_ASSIGN(auto session_config, CreateDefaultSessionConfig());
+  ASSERT_OK_AND_ASSIGN(const SessionId session_id,
+                       execution_manager_->RegisterNewSession(session_config));
+
+  std::vector<InputData> inputs;
+  ASSERT_OK_AND_ASSIGN(auto input_text,
+                       tokenizer_->TokenIdsToTensorBuffer({1, 2, 3}));
+  inputs.push_back(InputText(std::move(input_text)));
+  inputs.push_back(InputAudioEnd());
+
+  ASSERT_OK_AND_ASSIGN(const TaskId task_id,
+                       execution_manager_->GetNewTaskId());
+  ASSERT_OK(execution_manager_->AddPrefillTask(
+      session_id, task_id, std::move(inputs), {},
+      std::make_shared<std::atomic<bool>>(false),
+      [](absl::StatusOr<Responses> responses) { ASSERT_OK(responses); }));
+  EXPECT_OK(execution_manager_->WaitUntilDone(task_id, absl::Seconds(3)));
+
+  EXPECT_GE(stack_size.load(), size_t{1024 * 1024});
+}
+#endif  // defined(__APPLE__) || defined(__linux__)
 
 TEST_P(ExecutionManagerTest, AddPrefillTaskWithAudioModality) {
   auto fake_llm_executor = CreateDefaultFakeLlmExecutor();

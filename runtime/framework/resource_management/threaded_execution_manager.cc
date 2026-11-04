@@ -15,6 +15,7 @@
 #include "runtime/framework/resource_management/threaded_execution_manager.h"
 
 #include <atomic>
+#include <cstddef>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -64,6 +65,7 @@
 #include "runtime/executor/vision/vision_executor_settings.h"
 #include "runtime/framework/resource_management/execution_manager.h"
 #include "runtime/framework/resource_management/resource_manager.h"
+#include "runtime/framework/thread_options.h"
 #include "runtime/framework/threadpool.h"
 #include "runtime/util/convert_tensor_buffer.h"
 #include "runtime/util/executor_data_util.h"
@@ -72,6 +74,16 @@
 #include "runtime/util/tensor_buffer_util.h"
 
 namespace litert::lm {
+
+namespace {
+
+// The execution thread runs the model. YNNPACK puts buffers of up to 64 KiB on
+// the stack and can nest many of them, which overflows the 512 KiB default
+// stack of a secondary thread on Apple platforms. Unused stack pages take no
+// memory.
+constexpr size_t kExecutionThreadStackSize = 1024 * 1024;
+
+}  // namespace
 
 ThreadedExecutionManager::ThreadedExecutionManager(
     Tokenizer* absl_nonnull tokenizer,
@@ -82,9 +94,10 @@ ThreadedExecutionManager::ThreadedExecutionManager(
       resource_manager_(std::move(resource_manager)),
       litert_env_(litert_env),
       runtime_debugger_(std::move(runtime_debugger)) {
-  execution_thread_pool_ =
-      std::make_unique<ThreadPool>(/*name_prefix=*/"execution_thread_pool",
-                                   /*max_num_threads=*/1);
+  execution_thread_pool_ = std::make_unique<ThreadPool>(
+      /*name_prefix=*/"execution_thread_pool",
+      /*max_num_threads=*/1,
+      ThreadOptions().set_stack_size(kExecutionThreadStackSize));
   callback_thread_pool_ =
       std::make_unique<ThreadPool>(/*name_prefix=*/"callback_thread_pool",
                                    /*max_num_threads=*/1);

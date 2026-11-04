@@ -14,8 +14,14 @@
 
 #include "runtime/framework/threadpool.h"
 
+#if defined(__APPLE__) || defined(__linux__)
+#include <pthread.h>
+#endif
+
 #include <atomic>
+#include <cstddef>
 #include <set>
+#include <thread>  // NOLINT
 #include <vector>
 
 #include <gmock/gmock.h>
@@ -118,6 +124,60 @@ TEST(ThreadPoolTest, CreateWithCPUAffinity) {
   EXPECT_EQ(thread_pool.num_threads(), 0);
   EXPECT_EQ(thread_pool.thread_options().cpu_set().size(), 1);
 }
+
+#if defined(__APPLE__) || defined(__linux__)
+size_t CurrentThreadStackSize() {
+#if defined(__APPLE__)
+  return pthread_get_stacksize_np(pthread_self());
+#else
+  pthread_attr_t attr;
+  pthread_getattr_np(pthread_self(), &attr);
+  void* stack_addr = nullptr;
+  size_t stack_size = 0;
+  pthread_attr_getstack(&attr, &stack_addr, &stack_size);
+  pthread_attr_destroy(&attr);
+  return stack_size;
+#endif
+}
+
+TEST(ThreadPoolTest, WorkerThreadUsesRequestedStackSize) {
+  // Larger than the default stack of a thread on Apple platforms and on Linux.
+  constexpr size_t kStackSize = 16 * 1024 * 1024;
+  ThreadPool thread_pool("testpool", 1,
+                         ThreadOptions().set_stack_size(kStackSize));
+  std::atomic<size_t> stack_size = 0;
+  ASSERT_OK(thread_pool.Schedule(
+      [&stack_size] { stack_size = CurrentThreadStackSize(); }));
+  ASSERT_OK(thread_pool.WaitUntilDone(absl::Seconds(10)));
+  EXPECT_GE(stack_size.load(), kStackSize);
+}
+
+TEST(ThreadPoolTest, WorkerThreadWithoutStackSizeUsesSystemDefault) {
+  size_t default_stack_size = 0;
+  std::thread([&default_stack_size] {
+    default_stack_size = CurrentThreadStackSize();
+  }).join();
+  ThreadPool thread_pool("testpool", 1);
+  std::atomic<size_t> stack_size = 0;
+  ASSERT_OK(thread_pool.Schedule(
+      [&stack_size] { stack_size = CurrentThreadStackSize(); }));
+  ASSERT_OK(thread_pool.WaitUntilDone(absl::Seconds(10)));
+  EXPECT_EQ(stack_size.load(), default_stack_size);
+}
+
+TEST(ThreadPoolTest, WorkerThreadUsesSystemDefaultWhenSystemRefusesStackSize) {
+  size_t default_stack_size = 0;
+  std::thread([&default_stack_size] {
+    default_stack_size = CurrentThreadStackSize();
+  }).join();
+  ThreadPool thread_pool("testpool", 1, ThreadOptions().set_stack_size(1));
+  std::atomic<size_t> stack_size = 0;
+  ASSERT_OK(thread_pool.Schedule(
+      [&stack_size] { stack_size = CurrentThreadStackSize(); }));
+  ASSERT_OK(thread_pool.WaitUntilDone(absl::Seconds(10)));
+  EXPECT_EQ(stack_size.load(), default_stack_size);
+}
+#endif  // defined(__APPLE__) || defined(__linux__)
 
 TEST(ThreadPoolTest, WaitUntilIdle) {
   ThreadPool thread_pool("testpool", 1);
