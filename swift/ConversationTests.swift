@@ -651,6 +651,25 @@ class ConversationTests: XCTestCase {
     localConversation = nil
   }
 
+  func testStreamHoldingLastConversationReferenceDoesNotBlockNextStream() async throws {
+    // Only the stream holds this conversation, so its last reference falls when the stream ends.
+    let stream = try await self.engine.createConversation().sendMessageStream(Message("Hello"))
+    for try await _ in stream {}
+
+    // The next stream of the engine finishes only if the engine's callback thread is free.
+    let next = try await self.engine.createConversation()
+    let finished = expectation(description: "The next stream finished.")
+    Task.detached {
+      do {
+        for try await _ in next.sendMessageStream(Message("Hello")) {}
+      } catch {
+        XCTFail("The next stream threw: \(error)")
+      }
+      finished.fulfill()
+    }
+    await fulfillment(of: [finished], timeout: 60)
+  }
+
   func testCloneConversationSucceeds() async throws {
     let template = """
       {{ bos_token }}{% for message in messages %}{{ message.content[0].text }}{% endfor %}
