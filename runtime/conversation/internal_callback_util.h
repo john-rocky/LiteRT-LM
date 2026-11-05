@@ -35,7 +35,8 @@ namespace litert::lm {
 // - model_data_processor: The ModelDataProcessor to use for translating
 //     the Responses to Message.
 // - processor_args: The arguments to use for the ModelDataProcessor.
-// - user_callback: The callback to pass the translated Message to.
+// - user_callback: The callback to pass the translated Message to. It is not
+//     called again after it receives an error.
 // - cancel_callback: Will be called in addition to user_callback when the
 //     cancellation exception is caught.
 // - complete_message_callback: Will also be called in addition to

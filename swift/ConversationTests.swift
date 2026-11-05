@@ -25,6 +25,15 @@ func testDataPath(forResource resource: String) -> String {
   return "\(testSrcdir)/\(resource)"
 }
 
+/// A tool that makes a conversation parse tool calls. The tests do not expect it to run.
+private struct NeverCalledTool: Tool {
+  static let name = "neverCalled"
+  static let description = "A tool that the tests do not expect to run."
+  func run() async throws -> Any {
+    return ()
+  }
+}
+
 class ConversationTests: XCTestCase {
 
   var engine: Engine!
@@ -269,6 +278,39 @@ class ConversationTests: XCTestCase {
         "Expected LiteRTLMError.conversation(.invalidResponse(...)) containing 'CANCELLED', but got: \(String(describing: didReceiveError))"
       )
     }
+  }
+
+  func testStreamEndsOnceWhenToolCallFailsToParse() async throws {
+    // swift-format-ignore
+    let modelResource =
+      "runtime/testdata/fake_gemma4.litertlm"
+    let localEngine = Engine(
+      engineConfig: try EngineConfig(
+        modelPath: testDataPath(forResource: modelResource),
+        maxNumTokens: 256,
+        cacheDir: NSTemporaryDirectory()
+      )
+    )
+    try await localEngine.initialize()
+    var conversation: Conversation? = try await localEngine.createConversation(
+      with: ConversationConfig(
+        tools: [NeverCalledTool()], automaticToolCalling: false, enableResponseFormat: true))
+
+    // This response format makes the model write a tool call that does not parse. A response format
+    // applies only without automatic tool calling.
+    let stream = conversation!.sendMessageStream(
+      Message("Hello"),
+      responseFormat: ResponseFormat.regex(pattern: "<\\|tool_call>call:x\\{<tool_call\\|>"))
+    do {
+      for try await _ in stream {}
+      XCTFail("Stream should have thrown an error.")
+    } catch LiteRTLMError.conversation(.invalidResponse(let details)) {
+      XCTAssertTrue(details.contains("Failed to parse tool calls"), details)
+    }
+
+    // Deleting the conversation waits for its task, so whatever the runtime sends after the error
+    // has arrived by now. A chunk after the error would find the stream's state gone.
+    conversation = nil
   }
 
   func testBenchmarkInfoOnEmptyConversation() async throws {

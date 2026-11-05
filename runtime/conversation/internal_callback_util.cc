@@ -257,6 +257,19 @@ absl::AnyInvocable<void(absl::StatusOr<Responses>)> CreateInternalCallback(
     absl::string_view tool_call_channel_name) {
   auto channels = GetChannels(model_data_processor, custom_channels);
 
+  // An error ends the stream for the user: the C API reports it as the final
+  // chunk, and the caller can free its state on it. Decoding goes on after a
+  // tool call fails to parse, and parsing the complete text at the end fails
+  // again, so nothing is sent after the first error.
+  user_callback = [user_callback = std::move(user_callback),
+                   failed = false](absl::StatusOr<Message> message) mutable {
+    if (failed) {
+      return;
+    }
+    failed = !message.ok();
+    user_callback(std::move(message));
+  };
+
   bool initial_inside_channel = false;
   std::string initial_active_channel_end;
   std::string initial_active_channel_name;

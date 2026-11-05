@@ -597,6 +597,25 @@ TEST_F(InternalCallbackTest, InvalidFunctionCall) {
   EXPECT_THAT(status_, StatusIs(absl::StatusCode::kInvalidArgument));
 }
 
+TEST_F(InternalCallbackTest, NothingIsSentAfterAnError) {
+  int num_calls = 0;
+  auto callback =
+      CreateInternalCallback(*model_data_processor_, processor_args_, channels_,
+                             [&](absl::StatusOr<Message> message) {
+                               ++num_calls;
+                               status_ = message.status();
+                             });
+
+  callback(Responses(TaskState::kProcessing, {"```tool_code\n"}));
+  callback(Responses(TaskState::kProcessing, {"not a function call"}));
+  callback(Responses(TaskState::kProcessing, {"\n```"}));
+  callback(Responses(TaskState::kProcessing, {"more text"}));
+  callback(Responses(TaskState::kDone));
+
+  EXPECT_EQ(num_calls, 1);
+  EXPECT_THAT(status_, StatusIs(absl::StatusCode::kInvalidArgument));
+}
+
 // Verifies that when the system flushes the `complete_message` (e.g. used for
 // capturing history during `async=true` queries), tool call blocks aren't
 // accidentally stripped out as raw channels before the message formatter can
