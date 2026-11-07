@@ -2065,8 +2065,9 @@ void CopyTensorBufferContents(
   contents.assign(data, data + size);
 }
 
-// Tests that a new sequence (Reset(), a new context, or a rewind to step 0)
-// starts from zeroed state buffers, which a linear attention state needs. The
+// Tests that a new sequence (Reset(), a new context, or a rewind to step 0) has
+// no processed tokens, starts from a zeroed linear attention state and keeps
+// the KV cache, whose entries past the current step are masked by position. The
 // magic test models have one layer of KV cache: kv_cache_k_0 is
 // [1, batch, context_length, 64] and kv_cache_v_0 is
 // [1, batch, 64, context_length]. Most tests declare kv_cache_k_0 as a linear
@@ -2180,7 +2181,7 @@ TEST_F(LlmLiteRtCompiledModelExecutorLinearAttentionTest,
   ASSERT_OK(Prefill());
 
   EXPECT_THAT(key_cache_, Each(0));
-  EXPECT_THAT(value_cache_, Each(0));
+  EXPECT_THAT(value_cache_, Contains(Ne(0)));
 }
 
 TEST_F(LlmLiteRtCompiledModelExecutorLinearAttentionTest,
@@ -2200,7 +2201,7 @@ TEST_F(LlmLiteRtCompiledModelExecutorLinearAttentionTest,
   ASSERT_OK(Prefill());
 
   EXPECT_THAT(key_cache_, Each(0));
-  EXPECT_THAT(value_cache_, Each(0));
+  EXPECT_THAT(value_cache_, Contains(Ne(0)));
 }
 
 TEST_F(LlmLiteRtCompiledModelExecutorLinearAttentionTest,
@@ -2221,7 +2222,7 @@ TEST_F(LlmLiteRtCompiledModelExecutorLinearAttentionTest,
   ASSERT_OK(Prefill());
 
   EXPECT_THAT(key_cache_, Each(0));
-  EXPECT_THAT(value_cache_, Each(0));
+  EXPECT_THAT(value_cache_, Contains(Ne(0)));
 }
 
 TEST_F(
@@ -2240,7 +2241,7 @@ TEST_F(
 
   // Restoring preserves the shared KV cache state (so a sibling handler or
   // prefix match can still use it), while a subsequent Prefill() from step 0
-  // rolls back ProcessedTokens to 0 and zeroes the state buffers.
+  // rolls back ProcessedTokens to 0 and zeroes the linear attention state.
   ASSERT_OK(executor_->RestoreContext(std::move(context)));
   ASSERT_OK_AND_ASSIGN(auto cloned_before_prefill, executor_->CloneContext());
   EXPECT_NE(static_cast<LlmProcessedContext&>(
@@ -2252,7 +2253,7 @@ TEST_F(
   ASSERT_OK(Prefill());
 
   EXPECT_THAT(key_cache_, Each(0));
-  EXPECT_THAT(value_cache_, Each(0));
+  EXPECT_THAT(value_cache_, Contains(Ne(0)));
 }
 
 TEST_F(LlmLiteRtCompiledModelExecutorLinearAttentionTest,
@@ -2268,7 +2269,36 @@ TEST_F(LlmLiteRtCompiledModelExecutorLinearAttentionTest,
   ASSERT_OK(Prefill());
 
   EXPECT_THAT(key_cache_, Each(0));
-  EXPECT_THAT(value_cache_, Each(0));
+  EXPECT_THAT(value_cache_, Contains(Ne(0)));
+}
+
+TEST_F(LlmLiteRtCompiledModelExecutorLinearAttentionTest,
+       ResetRemovesProcessedTokens) {
+  ASSERT_NO_FATAL_FAILURE(CreateExecutor("magic_test_none.tflite",
+                                         /*with_linear_attention_state=*/true));
+  ASSERT_OK(Prefill());
+  ASSERT_OK(executor_->Decode());
+  ASSERT_GT(executor_->processed_tokens_for_testing().TokenCount(), 0);
+
+  ASSERT_OK(executor_->Reset());
+
+  EXPECT_EQ(executor_->processed_tokens_for_testing().TokenCount(), 0);
+}
+
+TEST_F(LlmLiteRtCompiledModelExecutorLinearAttentionTest,
+       RewindToStepZeroRemovesProcessedTokens) {
+  ASSERT_NO_FATAL_FAILURE(
+      CreateExecutor("magic_test_none.tflite",
+                     /*with_linear_attention_state=*/false));
+  ASSERT_OK(Prefill());
+  ASSERT_OK(executor_->Decode());
+  ASSERT_GT(executor_->processed_tokens_for_testing().TokenCount(), 0);
+
+  ASSERT_OK(executor_->SetCurrentStep(0));
+
+  ASSERT_OK_AND_ASSIGN(int current_step, executor_->GetCurrentStep());
+  EXPECT_EQ(current_step, 0);
+  EXPECT_EQ(executor_->processed_tokens_for_testing().TokenCount(), 0);
 }
 
 TEST_F(LlmLiteRtCompiledModelExecutorLinearAttentionTest,
@@ -2287,7 +2317,7 @@ TEST_F(LlmLiteRtCompiledModelExecutorLinearAttentionTest,
 }
 
 TEST_F(LlmLiteRtCompiledModelExecutorLinearAttentionTest,
-       PrefillAfterResetStartsFromZeroKvCacheWithoutLinearAttentionState) {
+       PrefillAfterResetKeepsKvCacheWithoutLinearAttentionState) {
   ASSERT_NO_FATAL_FAILURE(
       CreateExecutor("magic_test_none.tflite",
                      /*with_linear_attention_state=*/false));
@@ -2299,8 +2329,35 @@ TEST_F(LlmLiteRtCompiledModelExecutorLinearAttentionTest,
   RecordStateBuffersBeforeEachGraphRun();
   ASSERT_OK(Prefill());
 
-  EXPECT_THAT(key_cache_, Each(0));
-  EXPECT_THAT(value_cache_, Each(0));
+  EXPECT_THAT(key_cache_, Contains(Ne(0)));
+  EXPECT_THAT(value_cache_, Contains(Ne(0)));
+}
+
+TEST_F(LlmLiteRtCompiledModelExecutorLinearAttentionTest,
+       DecodeAfterResetIsNotAffectedByPreviousSequence) {
+  ASSERT_NO_FATAL_FAILURE(
+      CreateExecutor("magic_test_none.tflite",
+                     /*with_linear_attention_state=*/false));
+  ASSERT_OK(Prefill());
+  ASSERT_OK_AND_ASSIGN(TensorBuffer first_logits,
+                       executor_->DecodeLogits(MakeTextInputs({6})));
+  LITERT_ASSERT_OK_AND_ASSIGN(std::vector<float> expected_logits,
+                              CopyFromTensorBuffer<float>(first_logits));
+
+  // A longer sequence leaves KV cache entries past the steps that the next
+  // sequence reads.
+  ASSERT_OK(executor_->Reset());
+  ASSERT_OK(executor_->Prefill(MakeTextInputs({9, 8, 7, 6, 5, 4, 3, 2})));
+  ASSERT_OK(executor_->Decode());
+  ASSERT_OK(executor_->Decode());
+
+  ASSERT_OK(executor_->Reset());
+  ASSERT_OK(Prefill());
+  ASSERT_OK_AND_ASSIGN(TensorBuffer logits,
+                       executor_->DecodeLogits(MakeTextInputs({6})));
+  LITERT_ASSERT_OK_AND_ASSIGN(std::vector<float> new_logits,
+                              CopyFromTensorBuffer<float>(logits));
+  EXPECT_EQ(new_logits, expected_logits);
 }
 
 TEST_F(LlmLiteRtCompiledModelExecutorLinearAttentionTest,
@@ -2316,11 +2373,11 @@ TEST_F(LlmLiteRtCompiledModelExecutorLinearAttentionTest,
   ASSERT_OK(executor_->Reset());
   RecordStateBuffersBeforeEachGraphRun();
   // The prefill copies the state of the first output head back from the decode
-  // state, which Reset() zeroed too.
+  // state, whose linear attention state Reset() zeroed too.
   ASSERT_OK(Prefill());
 
   EXPECT_THAT(key_cache_, Each(0));
-  EXPECT_THAT(value_cache_, Each(0));
+  EXPECT_THAT(value_cache_, Contains(Ne(0)));
 }
 
 absl::StatusOr<

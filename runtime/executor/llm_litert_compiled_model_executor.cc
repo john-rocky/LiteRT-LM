@@ -2145,10 +2145,16 @@ absl::Status LlmLiteRtCompiledModelExecutorBase::SetCurrentStep(int new_step) {
 absl::Status LlmLiteRtCompiledModelExecutorBase::Reset() {
   llm_context_->runtime_state().current_step = 0;
   mtp_primed_ = false;
-  // Zero out every state buffer, so that a new sequence does not continue from
-  // the previous one. The KV cache alone could be kept, since its entries past
-  // the current step are masked by position, but a linear attention state is a
-  // running summary of every token processed so far.
+  // A new sequence has no processed tokens, so that none of the previous
+  // sequence is left to match the next prefill.
+  ABSL_RETURN_IF_ERROR(
+      llm_context_->processed_context().processed_tokens().RollBackToStep(0));
+  // Reset sampler input handling as the step is rolled back.
+  if (sampler_ != nullptr && sampler_->HandlesInput()) {
+    ABSL_RETURN_IF_ERROR(SetSamplerInputHandling(/*reset=*/true));
+  }
+  // Zero out the state buffers that a new sequence must not continue from (see
+  // `StateInterface::Clear()`).
   const int output_heads =
       llm_context_->runtime_config().output_heads.value_or(1);
   const bool needs_allocation =

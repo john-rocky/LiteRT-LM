@@ -14,6 +14,7 @@
 
 #include "runtime/framework/resource_management/resource_manager.h"
 
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
@@ -23,17 +24,22 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include "absl/status/status.h"  // from @com_google_absl
+#include "absl/status/status_macros.h"  // from @com_google_absl
 #include "absl/status/statusor.h"  // from @com_google_absl
 #include "absl/strings/str_cat.h"  // from @com_google_absl
 #include "absl/time/time.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
+#include "litert/cc/litert_macros.h"  // from @litert
+#include "litert/cc/litert_tensor_buffer.h"  // from @litert
 #include "runtime/engine/engine_settings.h"
 #include "runtime/executor/executor_stats.h"
 #include "runtime/executor/fake_llm_executor.h"
 #include "runtime/executor/llm_executor.h"
 #include "runtime/executor/llm_executor_io_types.h"
+#include "runtime/executor/llm_executor_processed_tokens.h"
 #include "runtime/executor/llm_executor_settings.h"
 #include "runtime/framework/resource_management/context_handler/context_handler.h"
+#include "runtime/util/convert_tensor_buffer.h"
 #include "runtime/util/test_utils.h"  // IWYU pragma: keep
 
 namespace litert::lm {
@@ -43,6 +49,15 @@ using ::testing::ElementsAre;
 using ::testing::FieldsAre;
 using ::testing::status::IsOkAndHolds;
 using ::testing::status::StatusIs;
+
+// Returns the inputs of a prefill of `token_ids`.
+ExecutorInputs TextInputs(absl::Span<const int> token_ids) {
+  auto token_ids_buffer = CopyToTensorBuffer<int>(
+      token_ids, {1, static_cast<int>(token_ids.size())});
+  ExecutorInputs inputs;
+  inputs.SetTextData(ExecutorTextData(std::move(*token_ids_buffer)));
+  return inputs;
+}
 
 // A fake executor that reports executor stats and counts stat resets.
 class StatsFakeLlmExecutor : public FakeLlmExecutor {
@@ -232,10 +247,10 @@ class ContextSwitchFakeLlmExecutor : public FakeLlmExecutor {
   ContextSwitchCounts* counts_;
 };
 
-// Clones share the processed context of the session they were cloned from, so
-// the resource manager switches between them with `UpdateRuntimeState()`
-// rather than `RestoreContext()`. Executors that keep per-context state must
-// treat both as a context switch (b/578989824).
+// Clones of a session past step 0 share its processed context, so the resource
+// manager switches between them with `UpdateRuntimeState()` rather than
+// `RestoreContext()`. Executors that keep per-context state must treat both as
+// a context switch (b/578989824).
 TEST(ResourceManagerTest, SwitchesToClonesByUpdatingRuntimeState) {
   ContextSwitchCounts counts;
   ASSERT_OK_AND_ASSIGN(
@@ -248,8 +263,15 @@ TEST(ResourceManagerTest, SwitchesToClonesByUpdatingRuntimeState) {
   ASSERT_OK_AND_ASSIGN(
       std::shared_ptr<ContextHandler> root,
       resource_manager->CreateContextHandler(SessionConfig::CreateDefault()));
-  ASSERT_OK(resource_manager->AcquireExecutorWithContextHandler(root));
-  EXPECT_EQ(counts.restored_contexts, 1);
+  {
+    ASSERT_OK_AND_ASSIGN(
+        std::unique_ptr<LlmExecutor> executor,
+        resource_manager->AcquireExecutorWithContextHandler(root));
+    EXPECT_EQ(counts.restored_contexts, 1);
+    // Moves the root past step 0, since a clone of a session at step 0 gets its
+    // own processed context.
+    ASSERT_OK(executor->Prefill(TextInputs({1, 2, 3})));
+  }
 
   ASSERT_OK_AND_ASSIGN(std::shared_ptr<ContextHandler> clone_1,
                        resource_manager->CloneContextHandler(root));
@@ -412,6 +434,251 @@ TEST(ResourceManagerTest, RotatesThreeLiveSessionsWithoutCloning) {
   EXPECT_EQ(counts.released_without_save_state, 0);
   EXPECT_EQ(counts.released_with_save_state, 8);
   EXPECT_EQ(counts.cloned_contexts, 0);
+}
+
+// A fake executor that records the tokens of each prefill that reaches it.
+class PrefillRecordingFakeLlmExecutor : public FakeLlmExecutor {
+ public:
+  explicit PrefillRecordingFakeLlmExecutor(
+      std::vector<std::vector<int>>* prefills)
+      : FakeLlmExecutor(/*vocab_size=*/16, /*prefill_tokens_set=*/{{1, 2, 3}},
+                        /*decode_tokens_set=*/{{4}}),
+        prefills_(prefills) {}
+
+  using FakeLlmExecutor::Prefill;
+  absl::Status Prefill(const ExecutorInputs& inputs,
+                       const ExecutorPrefillParams& prefill_params) override {
+    ABSL_ASSIGN_OR_RETURN(const TensorBuffer* token_ids,
+                          inputs.GetTextTokenIdsPtr());
+    LITERT_ASSIGN_OR_RETURN(std::vector<int> ids,
+                            CopyFromTensorBuffer<int>(*token_ids));
+    prefills_->push_back(std::move(ids));
+    return FakeLlmExecutor::Prefill(inputs, prefill_params);
+  }
+
+ private:
+  std::vector<std::vector<int>>* prefills_;
+};
+
+// After a rewind to step 0, a prefill of the same tokens runs on all of them:
+// the executor removed its processed tokens, so none are left to match.
+TEST(ResourceManagerTest, PrefillAfterRewindToStepZeroRunsAllTokens) {
+  std::vector<std::vector<int>> prefills;
+  ASSERT_OK_AND_ASSIGN(
+      auto resource_manager,
+      ResourceManager::Create(
+          /*model_resources=*/nullptr,
+          std::make_unique<PrefillRecordingFakeLlmExecutor>(&prefills),
+          /*vision_executor_settings=*/nullptr,
+          /*audio_executor_settings=*/nullptr, /*litert_env=*/nullptr));
+  ASSERT_OK_AND_ASSIGN(
+      std::shared_ptr<ContextHandler> handler,
+      resource_manager->CreateContextHandler(SessionConfig::CreateDefault()));
+  ASSERT_OK_AND_ASSIGN(
+      std::unique_ptr<LlmExecutor> executor,
+      resource_manager->AcquireExecutorWithContextHandler(handler));
+  ASSERT_OK(executor->Prefill(TextInputs({1, 2, 3})));
+  ASSERT_OK(executor->Decode());
+
+  ASSERT_OK(executor->SetCurrentStep(0));
+  ASSERT_OK(executor->Prefill(TextInputs({1, 2, 3})));
+
+  EXPECT_THAT(prefills,
+              ElementsAre(ElementsAre(1, 2, 3), ElementsAre(1, 2, 3)));
+  EXPECT_THAT(executor->GetCurrentStep(), IsOkAndHolds(3));
+}
+
+// A fake executor that keeps the runtime state and the processed tokens in the
+// loaded context, as the LiteRT compiled model executors do, so that the
+// resource manager can switch between contexts. As in those executors, a new
+// sequence (`Reset()`, a rewind to step 0, or a context restored at step 0) has
+// no processed tokens. A prefill appends its tokens, and a decode appends
+// `kDecodedToken`.
+class ContextFakeLlmExecutor : public FakeLlmExecutor {
+ public:
+  static constexpr int kDecodedToken = 9;
+
+  ContextFakeLlmExecutor()
+      : FakeLlmExecutor(/*vocab_size=*/16, /*prefill_tokens_set=*/{},
+                        /*decode_tokens_set=*/{}),
+        llm_context_(NewContext(RuntimeConfig())) {}
+
+  using FakeLlmExecutor::Decode;
+  using FakeLlmExecutor::Prefill;
+  using FakeLlmExecutor::RestoreContext;
+
+  absl::Status Prefill(const ExecutorInputs& inputs) override {
+    return Prefill(inputs, ExecutorPrefillParams());
+  }
+  absl::Status Prefill(const ExecutorInputs& inputs,
+                       const ExecutorPrefillParams& prefill_params) override {
+    ABSL_ASSIGN_OR_RETURN(const TensorBuffer* token_ids,
+                          inputs.GetTextTokenIdsPtr());
+    LITERT_ASSIGN_OR_RETURN(std::vector<int> ids,
+                            CopyFromTensorBuffer<int>(*token_ids));
+    ABSL_RETURN_IF_ERROR(processed_tokens().RollBackToStep(current_step()));
+    processed_tokens().AddProcessedTokens(ids);
+    current_step() += static_cast<int>(ids.size());
+    return absl::OkStatus();
+  }
+
+  absl::StatusOr<std::vector<std::vector<int>>> Decode(
+      const ExecutorDecodeParams& decode_params) override {
+    ABSL_RETURN_IF_ERROR(processed_tokens().RollBackToStep(current_step()));
+    processed_tokens().AddProcessedTokens({kDecodedToken});
+    ++current_step();
+    return std::vector<std::vector<int>>{{kDecodedToken}};
+  }
+
+  absl::StatusOr<int> GetCurrentStep() const override {
+    return llm_context_->runtime_state().current_step;
+  }
+
+  absl::Status SetCurrentStep(int new_step) override {
+    if (new_step < 0 || new_step > processed_tokens().TokenCount()) {
+      return absl::InvalidArgumentError("The step is out of range.");
+    }
+    if (new_step == 0) {
+      return Reset();
+    }
+    current_step() = new_step;
+    return absl::OkStatus();
+  }
+
+  absl::Status Reset() override {
+    current_step() = 0;
+    return processed_tokens().RollBackToStep(0);
+  }
+
+  absl::StatusOr<const ProcessedTokens*> GetProcessedTokens() const override {
+    return &processed_tokens();
+  }
+
+  absl::StatusOr<RuntimeConfig> GetRuntimeConfig() const override {
+    return llm_context_->runtime_config();
+  }
+  absl::Status UpdateRuntimeConfig(
+      const RuntimeConfig& runtime_config) override {
+    llm_context_->runtime_config() = runtime_config;
+    return absl::OkStatus();
+  }
+  absl::StatusOr<RuntimeState> GetRuntimeState() const override {
+    return llm_context_->runtime_state();
+  }
+  absl::Status UpdateRuntimeState(const RuntimeState& runtime_state) override {
+    llm_context_->runtime_state() = runtime_state;
+    return absl::OkStatus();
+  }
+
+  absl::StatusOr<std::unique_ptr<LlmContext>> CreateNewContext(
+      std::optional<uint32_t> lora_id,
+      RuntimeConfig runtime_config) const override {
+    return NewContext(std::move(runtime_config));
+  }
+  absl::StatusOr<std::unique_ptr<LlmContext>> CloneContext() const override {
+    auto processed_context = std::make_unique<FakeProcessedContext>();
+    processed_context->processed_tokens() = processed_tokens();
+    return std::make_unique<LlmContext>(
+        std::move(processed_context),
+        std::make_unique<RuntimeConfig>(llm_context_->runtime_config()),
+        std::make_unique<RuntimeState>(llm_context_->runtime_state()));
+  }
+  absl::Status RestoreContext(
+      std::unique_ptr<LlmContext> llm_context) override {
+    llm_context_ = std::move(llm_context);
+    if (llm_context_->runtime_state().current_step == 0) {
+      return Reset();
+    }
+    return absl::OkStatus();
+  }
+
+ private:
+  static std::unique_ptr<LlmContext> NewContext(RuntimeConfig runtime_config) {
+    return std::make_unique<LlmContext>(
+        std::make_unique<FakeProcessedContext>(),
+        std::make_unique<RuntimeConfig>(std::move(runtime_config)),
+        std::make_unique<RuntimeState>());
+  }
+
+  int& current_step() { return llm_context_->runtime_state().current_step; }
+  ProcessedTokens& processed_tokens() const {
+    return llm_context_->processed_context().processed_tokens();
+  }
+
+  // The loaded context.
+  std::unique_ptr<LlmContext> llm_context_;
+};
+
+// A rewind to step 0 starts a new sequence in the processed context loaded in
+// the executor. A clone that shares that processed context keeps its own copy.
+TEST(ResourceManagerTest, RewindToStepZeroKeepsTheClonesContext) {
+  ASSERT_OK_AND_ASSIGN(
+      auto resource_manager,
+      ResourceManager::Create(
+          /*model_resources=*/nullptr,
+          std::make_unique<ContextFakeLlmExecutor>(),
+          /*vision_executor_settings=*/nullptr,
+          /*audio_executor_settings=*/nullptr, /*litert_env=*/nullptr));
+  ASSERT_OK_AND_ASSIGN(
+      std::shared_ptr<ContextHandler> original,
+      resource_manager->CreateContextHandler(SessionConfig::CreateDefault()));
+  {
+    ASSERT_OK_AND_ASSIGN(
+        std::unique_ptr<LlmExecutor> executor,
+        resource_manager->AcquireExecutorWithContextHandler(original));
+    ASSERT_OK(executor->Prefill(TextInputs({1, 2, 3})));
+    ASSERT_OK(executor->Decode());
+  }
+  ASSERT_OK_AND_ASSIGN(std::shared_ptr<ContextHandler> clone,
+                       resource_manager->CloneContextHandler(original));
+  {
+    ASSERT_OK_AND_ASSIGN(
+        std::unique_ptr<LlmExecutor> executor,
+        resource_manager->AcquireExecutorWithContextHandler(original));
+    ASSERT_OK(executor->SetCurrentStep(0));
+  }
+
+  ASSERT_OK_AND_ASSIGN(
+      std::unique_ptr<LlmExecutor> executor,
+      resource_manager->AcquireExecutorWithContextHandler(clone));
+  EXPECT_THAT(executor->GetCurrentStep(), IsOkAndHolds(4));
+  ASSERT_OK_AND_ASSIGN(const ProcessedTokens* processed_tokens,
+                       executor->GetProcessedTokens());
+  EXPECT_THAT(
+      processed_tokens->GetCopyOfTokens(),
+      ElementsAre(ElementsAre(1, 2, 3, ContextFakeLlmExecutor::kDecodedToken)));
+  EXPECT_OK(executor->Decode());
+}
+
+// A clone of a session at step 0 gets its own processed context, so that its
+// prefill does not leave processed tokens in the original's.
+TEST(ResourceManagerTest, CloneAtStepZeroGetsItsOwnContext) {
+  ASSERT_OK_AND_ASSIGN(
+      auto resource_manager,
+      ResourceManager::Create(
+          /*model_resources=*/nullptr,
+          std::make_unique<ContextFakeLlmExecutor>(),
+          /*vision_executor_settings=*/nullptr,
+          /*audio_executor_settings=*/nullptr, /*litert_env=*/nullptr));
+  ASSERT_OK_AND_ASSIGN(
+      std::shared_ptr<ContextHandler> original,
+      resource_manager->CreateContextHandler(SessionConfig::CreateDefault()));
+  ASSERT_OK_AND_ASSIGN(std::shared_ptr<ContextHandler> clone,
+                       resource_manager->CloneContextHandler(original));
+  {
+    ASSERT_OK_AND_ASSIGN(
+        std::unique_ptr<LlmExecutor> executor,
+        resource_manager->AcquireExecutorWithContextHandler(clone));
+    ASSERT_OK(executor->Prefill(TextInputs({1, 2, 3})));
+  }
+
+  ASSERT_OK_AND_ASSIGN(
+      std::unique_ptr<LlmExecutor> executor,
+      resource_manager->AcquireExecutorWithContextHandler(original));
+  EXPECT_THAT(executor->GetCurrentStep(), IsOkAndHolds(0));
+  ASSERT_OK_AND_ASSIGN(const ProcessedTokens* processed_tokens,
+                       executor->GetProcessedTokens());
+  EXPECT_EQ(processed_tokens->TokenCount(), 0);
 }
 
 }  // namespace
