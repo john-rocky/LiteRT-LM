@@ -102,8 +102,9 @@ class ResourceManager {
           ABSL_LOCKS_EXCLUDED(audio_executor_mutex_);
 
   // Clones the context handler.
-  // The cloned context handler will have the same shared processed context as
-  // the original context handler.
+  // The cloned context handler shares the original's processed context, unless
+  // the original is at step 0: the clone then gets a new, empty one of its own,
+  // with the original's LoRA id.
   // The cloned context handler's runtime config and runtime state however will
   // be copied from the original context handler, thus the values will initially
   // be the same, but can be different afterward.

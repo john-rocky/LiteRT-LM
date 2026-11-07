@@ -302,7 +302,8 @@ absl::Status FakeLlmExecutor::Reset() {
   current_step_ = 0;
   prefill_tokens_total_ = 0;
   last_op_ = LastOp::kNone;
-  return absl::OkStatus();
+  // A new sequence has no processed tokens.
+  return processed_tokens_.RollBackToStep(0);
 }
 
 absl::Status FakeLlmExecutor::CheckDraftVerificationSupport() const {

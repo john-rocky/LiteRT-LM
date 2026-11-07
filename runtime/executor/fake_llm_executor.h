@@ -165,6 +165,10 @@ class FakeLlmExecutor : public LlmExecutor {
   }
 
   absl::Status SetCurrentStep(int current_step) override {
+    if (current_step == 0) {
+      // Like LlmLiteRtCompiledModelExecutorBase: step 0 begins a new sequence.
+      return Reset();
+    }
     current_step_ = current_step;
     if (current_step >= prefill_tokens_total_) {
       decode_times_ = current_step - prefill_tokens_total_;
