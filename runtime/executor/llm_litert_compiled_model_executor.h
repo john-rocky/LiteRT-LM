@@ -164,7 +164,7 @@ class LlmLiteRtCompiledModelExecutorBase : public LlmExecutor {
     return &llm_context_->processed_context().processed_tokens();
   }
 
-  // Resets all of the internal states.
+  // Starts a new sequence. See StateInterface::Clear() for the state kept.
   absl::Status Reset() override;
 
   absl::StatusOr<int> GetVocabSize() override;

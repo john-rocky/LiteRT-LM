@@ -65,9 +65,11 @@ class StateInterface {
   // model.
   virtual bool Contains(absl::string_view tensor_name) const = 0;
 
-  // Zeroes out all the buffers held in this state container. Should attempt to
-  // perform the operation asynchronously if the underlying buffers support
-  // asynchronous operations.
+  // Zeroes out the buffers that a new sequence must start from zero, e.g. a
+  // linear attention state. Buffers whose stale entries are masked by position,
+  // e.g. a global KV cache, may be kept. Should attempt to perform the
+  // operation asynchronously if the underlying buffers support asynchronous
+  // operations.
   virtual absl::Status Clear() = 0;
 };
 

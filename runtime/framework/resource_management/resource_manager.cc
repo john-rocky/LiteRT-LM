@@ -436,6 +436,9 @@ class LockedLlmExecutor : public LlmExecutor {
   }
 
   absl::Status SetCurrentStep(int new_step) override {
+    if (new_step == 0) {
+      ABSL_RETURN_IF_ERROR(SeparateSharedProcessedContextBeforeReset());
+    }
     return llm_executor_->SetCurrentStep(new_step);
   }
 
@@ -464,7 +467,10 @@ class LockedLlmExecutor : public LlmExecutor {
     return llm_executor_->VerifyDraft(draft_token_ids, decode_params);
   }
 
-  absl::Status Reset() override { return llm_executor_->Reset(); }
+  absl::Status Reset() override {
+    ABSL_RETURN_IF_ERROR(SeparateSharedProcessedContextBeforeReset());
+    return llm_executor_->Reset();
+  }
 
   absl::StatusOr<int> GetVocabSize() override {
     return llm_executor_->GetVocabSize();
@@ -475,6 +481,19 @@ class LockedLlmExecutor : public LlmExecutor {
   }
 
  private:
+  // A reset, or a rewind to step 0, starts a new sequence: the executor removes
+  // the processed tokens and zeroes the state of the loaded processed context.
+  // If other handlers (e.g. clones) share that processed context, saves it for
+  // them first and links the current handler to an empty one.
+  absl::Status SeparateSharedProcessedContextBeforeReset() {
+    if (current_handler_ == nullptr ||
+        !current_handler_->shared_processed_context()->IsShared()) {
+      return absl::OkStatus();
+    }
+    return SaveProcessedContextAndSeparateLoadedHandler(current_handler_,
+                                                        llm_executor_);
+  }
+
   absl::Status MaybeTruncateProcessedTokens() {
     if (current_handler_ == nullptr) {
       return absl::OkStatus();
@@ -731,6 +750,19 @@ ResourceManager::CloneContextHandler(
     ABSL_ASSIGN_OR_RETURN(runtime_state, llm_executor_->GetRuntimeState());
   }
   auto processed_context = llm_context_handler->shared_processed_context();
+  if (runtime_state.current_step == 0) {
+    // A clone of a context at step 0 starts a new sequence, so it gets its own
+    // processed context, created as in `CreateContextHandler()`, instead of
+    // sharing the one that the original fills.
+    ABSL_ASSIGN_OR_RETURN(auto llm_context,
+                          llm_executor_->CreateNewContext(
+                              /*lora_id=*/std::nullopt, runtime_config));
+    ABSL_ASSIGN_OR_RETURN(auto new_processed_context,
+                          llm_context->RetrieveProcessedContext());
+    processed_context =
+        std::make_shared<ContextHandler::SharedProcessedContext>(
+            std::move(new_processed_context));
+  }
 
   std::unique_ptr<AudioContext> audio_context;
   if (llm_context_handler->HasAudioContext()) {

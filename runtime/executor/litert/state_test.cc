@@ -288,6 +288,97 @@ TEST_F(LitertStateTest, CopyContentsFromRejectsMismatchedAllocationPolicy) {
               StatusIs(absl::StatusCode::kInternal));
 }
 
+// Adds the tensor `name` to `executor_metadata` as a state buffer of `type`.
+void AddStateBuffer(absl::string_view name, proto::StateBuffer::Type type,
+                    proto::ExecutorMetadata& executor_metadata) {
+  proto::StateBuffer* state_buffer =
+      executor_metadata.mutable_llm_executor_metadata()->add_state_buffers();
+  const std::string tensor_name(name);
+  state_buffer->set_prefill_input_name(tensor_name);
+  state_buffer->set_prefill_output_name(tensor_name);
+  state_buffer->set_decode_input_name(tensor_name);
+  state_buffer->set_decode_output_name(tensor_name);
+  state_buffer->set_type(type);
+  if (type != proto::StateBuffer::TYPE_LINEAR_ATTENTION) {
+    state_buffer->set_sequence_axis(2);
+  }
+}
+
+// Fills the state buffers of both ping-pong banks of `state` with `value`.
+void FillBothBanks(LitertState& state, CompiledModel& compiled_model,
+                   uint8_t value) {
+  // Each call swaps the banks, so two calls see both banks as inputs.
+  for (int i = 0; i < 2; ++i) {
+    ASSERT_OK_AND_ASSIGN(
+        auto buffers,
+        state.GetStateBuffers(compiled_model, kDecodeSignatureRunner));
+    for (auto& [_, buffer] : buffers.input_buffers) {
+      ASSERT_NO_FATAL_FAILURE(FillBuffer(buffer, value));
+    }
+  }
+}
+
+TEST_F(LitertStateTest,
+       ClearZeroesLinearAttentionAndLocalCachesAndKeepsGlobalKvCache) {
+  ASSERT_NO_FATAL_FAILURE(SetUpKV(kTestStaticModelPath,
+                                  LitertState::AllocationPolicy::kPingPong,
+                                  /*batch_size=*/1));
+  const struct {
+    proto::StateBuffer::Type type;
+    bool cleared;
+  } kTestCases[] = {
+      {proto::StateBuffer::TYPE_LINEAR_ATTENTION, true},
+      {proto::StateBuffer::TYPE_LOCAL_KEY_CACHE, true},
+      {proto::StateBuffer::TYPE_LOCAL_VALUE_CACHE, true},
+      {proto::StateBuffer::TYPE_GLOBAL_KEY_CACHE, false},
+      {proto::StateBuffer::TYPE_GLOBAL_VALUE_CACHE, false},
+  };
+  for (const auto& test_case : kTestCases) {
+    SCOPED_TRACE(proto::StateBuffer::Type_Name(test_case.type));
+    proto::ExecutorMetadata executor_metadata;
+    AddStateBuffer("kv_cache_k_0", test_case.type, executor_metadata);
+    AddStateBuffer("kv_cache_v_0", proto::StateBuffer::TYPE_GLOBAL_VALUE_CACHE,
+                   executor_metadata);
+    ASSERT_OK_AND_ASSIGN(
+        std::unique_ptr<LitertState> state,
+        LitertState::Create(*env_, *compiled_model_, kDecodeSignatureRunner,
+                            &executor_metadata,
+                            LitertState::AllocationPolicy::kPingPong,
+                            /*batch_size=*/1));
+    ASSERT_NO_FATAL_FAILURE(FillBothBanks(*state, *compiled_model_, 7));
+
+    ASSERT_OK(state->Clear());
+
+    for (int i = 0; i < 2; ++i) {
+      ASSERT_OK_AND_ASSIGN(
+          auto buffers,
+          state->GetStateBuffers(*compiled_model_, kDecodeSignatureRunner));
+      ASSERT_EQ(buffers.input_buffers.size(), 2u);
+      ASSERT_NO_FATAL_FAILURE(ExpectBufferFilledWith(
+          buffers.input_buffers.at("kv_cache_k_0"), test_case.cleared ? 0 : 7));
+      ASSERT_NO_FATAL_FAILURE(
+          ExpectBufferFilledWith(buffers.input_buffers.at("kv_cache_v_0"), 7));
+    }
+  }
+
+  // Without executor metadata, the KV cache buffers have no type, and are kept
+  // as a global KV cache is.
+  SCOPED_TRACE("no executor metadata");
+  ASSERT_NO_FATAL_FAILURE(FillBothBanks(*kv_cache_, *compiled_model_, 7));
+
+  ASSERT_OK(kv_cache_->Clear());
+
+  for (int i = 0; i < 2; ++i) {
+    ASSERT_OK_AND_ASSIGN(
+        auto buffers,
+        kv_cache_->GetStateBuffers(*compiled_model_, kDecodeSignatureRunner));
+    ASSERT_FALSE(buffers.input_buffers.empty());
+    for (auto& [name, buffer] : buffers.input_buffers) {
+      ASSERT_NO_FATAL_FAILURE(ExpectBufferFilledWith(buffer, 7)) << name;
+    }
+  }
+}
+
 #ifndef _WIN32
 TEST_F(LitertStateTest, CopyContentsFromRejectsMismatchedNumEntries) {
   ASSERT_NO_FATAL_FAILURE(SetUpKV(kTestDynamicModelPath,
