@@ -69,6 +69,12 @@ class StateInterface {
   // perform the operation asynchronously if the underlying buffers support
   // asynchronous operations.
   virtual absl::Status Clear() = 0;
+
+  // Zeroes out the buffers that a new sequence must start from zero, e.g. a
+  // linear attention state. Buffers whose stale entries are masked by position,
+  // e.g. a global KV cache, may be kept. The default implementation zeroes out
+  // all the buffers with Clear().
+  virtual absl::Status ClearForNewSequence() { return Clear(); }
 };
 
 }  // namespace litert::lm

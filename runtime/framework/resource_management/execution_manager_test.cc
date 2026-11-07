@@ -232,9 +232,10 @@ class StatefulFakeAudioExecutor : public AudioExecutor {
   int num_clone_context_calls_ = 0;
 };
 
-// A fake LLM executor that supports the runtime config/state round-trip the
-// resource manager performs when switching between or cloning context handlers
-// that share the same processed context.
+// A fake LLM executor that supports what the resource manager does when it
+// switches between or clones context handlers: the runtime config/state
+// round-trip for handlers that share the same processed context, and the
+// context copy and restore for handlers that do not.
 class ContextSwitchingFakeLlmExecutor : public FakeLlmExecutor {
  public:
   using FakeLlmExecutor::FakeLlmExecutor;
@@ -249,6 +250,12 @@ class ContextSwitchingFakeLlmExecutor : public FakeLlmExecutor {
 
   absl::Status UpdateRuntimeState(const RuntimeState& runtime_state) override {
     return absl::OkStatus();
+  }
+
+  absl::StatusOr<std::unique_ptr<LlmContext>> CloneContext() const override {
+    return std::make_unique<LlmContext>(
+        std::make_unique<FakeProcessedContext>(),
+        std::make_unique<RuntimeConfig>(), std::make_unique<RuntimeState>());
   }
 };
 
