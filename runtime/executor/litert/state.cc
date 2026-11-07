@@ -373,12 +373,30 @@ bool LitertState::Contains(absl::string_view tensor_name) const {
 }
 
 absl::Status LitertState::Clear() {
+  // Zero out the linear attention state (recurrent and convolution), which is a
+  // running summary of every token processed so far, and the sliding window KV
+  // cache. Keep the rest of the KV cache, whose entries past the current step
+  // are masked by position.
+  auto should_clear = [](const StateBuffer& state_buffer) {
+    switch (state_buffer.type) {
+      case proto::StateBuffer::TYPE_LINEAR_ATTENTION:
+      case proto::StateBuffer::TYPE_LOCAL_KEY_CACHE:
+      case proto::StateBuffer::TYPE_LOCAL_VALUE_CACHE:
+        return true;
+      default:
+        return false;
+    }
+  };
   for (auto& [_, state_buffer] : bank_1_state_buffers_) {
-    LITERT_RETURN_IF_ERROR(state_buffer.buffer.Clear());
+    if (should_clear(state_buffer)) {
+      LITERT_RETURN_IF_ERROR(state_buffer.buffer.Clear());
+    }
   }
   if (bank_2_state_buffers_.has_value()) {
     for (auto& [_, state_buffer] : *bank_2_state_buffers_) {
-      LITERT_RETURN_IF_ERROR(state_buffer.buffer.Clear());
+      if (should_clear(state_buffer)) {
+        LITERT_RETURN_IF_ERROR(state_buffer.buffer.Clear());
+      }
     }
   }
   return absl::OkStatus();
