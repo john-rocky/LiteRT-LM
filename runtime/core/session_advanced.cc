@@ -115,6 +115,27 @@ absl::StatusOr<std::unique_ptr<SessionAdvanced>> SessionAdvanced::Create(
       /*last_task_ids=*/{}, living_sessions_count, engine));
 }
 
+absl::AnyInvocable<void(absl::StatusOr<Responses>)>
+SessionAdvanced::ForgetPrefillIfInputDoesNotFit(
+    TaskId task_id,
+    absl::AnyInvocable<void(absl::StatusOr<Responses>)> callback) {
+  return [this, task_id, state_before_prefill = session_state_,
+          task_ids_before_prefill = last_task_ids_,
+          callback = std::move(callback)](
+             absl::StatusOr<Responses> responses) mutable {
+    if (absl::IsResourceExhausted(responses.status())) {
+      absl::MutexLock lock(mutex_);
+      if (last_task_ids_.size() == 1 && last_task_ids_.contains(task_id)) {
+        session_state_ = state_before_prefill;
+        last_task_ids_ = std::move(task_ids_before_prefill);
+      }
+    }
+    if (callback != nullptr) {
+      callback(std::move(responses));
+    }
+  };
+}
+
 absl::Status SessionAdvanced::RunPrefill(
     const std::vector<InputData>& contents) {
   absl::Status status = absl::OkStatus();
@@ -172,7 +193,7 @@ SessionAdvanced::RunPrefillAsync(
   ABSL_ASSIGN_OR_RETURN(auto task_id, execution_manager_lock->GetNewTaskId());
   ABSL_RETURN_IF_ERROR(execution_manager_lock->AddPrefillTask(
       session_id_, task_id, std::move(preprocessed_contents), last_task_ids_,
-      cancelled, std::move(callback)));
+      cancelled, ForgetPrefillIfInputDoesNotFit(task_id, std::move(callback))));
   session_state_ = SessionState::kPrefilled;
   last_task_ids_ = {task_id};
 
@@ -194,7 +215,7 @@ SessionAdvanced::PrefillPreprocessedContents(
   ABSL_ASSIGN_OR_RETURN(auto task_id, execution_manager_lock->GetNewTaskId());
   ABSL_RETURN_IF_ERROR(execution_manager_lock->AddPrefillTask(
       session_id_, task_id, std::move(preprocessed_contents), last_task_ids_,
-      cancelled, std::move(callback)));
+      cancelled, ForgetPrefillIfInputDoesNotFit(task_id, std::move(callback))));
   session_state_ = SessionState::kPrefilled;
   last_task_ids_ = {task_id};
 

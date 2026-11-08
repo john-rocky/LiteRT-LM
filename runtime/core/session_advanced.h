@@ -136,6 +136,9 @@ class SessionAdvanced : public SessionInterface {
       absl::AnyInvocable<void(absl::StatusOr<Responses>)> callback,
       bool store_token_lengths) override ABSL_LOCKS_EXCLUDED(mutex_);
 
+  // Returns RESOURCE_EXHAUSTED if the input does not fit in the space left in
+  // the context window; the context is then unchanged and the session can
+  // still be used.
   absl::Status RunPrefill(const std::vector<InputData>& contents) override;
 
   absl::StatusOr<std::unique_ptr<TaskController>> RunPrefillAsync(
@@ -278,6 +281,18 @@ class SessionAdvanced : public SessionInterface {
 
   // The implementation of CloneAsync which assumes mutex_ is locked.
   virtual absl::StatusOr<std::unique_ptr<SessionInterface>> CloneAsyncLocked(
+      absl::AnyInvocable<void(absl::StatusOr<Responses>)> callback)
+      ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+
+  // Returns the callback for the prefill task `task_id`, which calls
+  // `callback`. A prefill whose input does not fit in the context window fails
+  // with RESOURCE_EXHAUSTED before it changes the context. If no task follows
+  // it yet, the session goes back to the state and the task dependencies it had
+  // before the prefill, so that the next task does not depend on the failed
+  // one.
+  absl::AnyInvocable<void(absl::StatusOr<Responses>)>
+  ForgetPrefillIfInputDoesNotFit(
+      TaskId task_id,
       absl::AnyInvocable<void(absl::StatusOr<Responses>)> callback)
       ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 

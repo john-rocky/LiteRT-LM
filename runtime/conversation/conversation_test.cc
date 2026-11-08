@@ -901,6 +901,13 @@ TEST_P(ConversationTest, SendMessageNotFittingInContextFails) {
                        conversation->GetTokenCount());
   EXPECT_EQ(tokens_after_second_turn, tokens_after_first_turn);
   EXPECT_THAT(conversation->GetHistory(), testing::SizeIs(2));
+
+  // The rejected message must not keep the next message from running.
+  ASSERT_OK(
+      conversation
+          ->SendMessage(user_message, OptionalArgs{.max_output_tokens = 2})
+          .status());
+  EXPECT_THAT(conversation->GetHistory(), testing::SizeIs(4));
 }
 
 TEST_P(ConversationTest, SendMessageGemma3Template) {

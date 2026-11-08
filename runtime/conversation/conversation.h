@@ -551,6 +551,9 @@ class Conversation {
   //    definition of `OptionalArgs` for more details.
   // Returns :
   // - The complete message from the LLM.
+  // - RESOURCE_EXHAUSTED if the input of the message does not fit in the space
+  //   left in the context window; the message is then removed from the history
+  //   and the conversation can still be used for a message that fits.
   absl::StatusOr<Message> SendMessage(
       const Message& message, OptionalArgs optional_args = OptionalArgs());
 

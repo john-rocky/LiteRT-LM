@@ -1516,6 +1516,60 @@ TEST_F(SessionAdvancedTest, RewindToStepRecoversFromFailure) {
   EXPECT_EQ(responses.GetTexts()[0], "How'");
 }
 
+TEST_F(SessionAdvancedTest, RunPrefillAfterPrefillNotFittingInContext) {
+  const std::vector<std::vector<int>> stop_token_ids = {{2294}};
+  SessionConfig session_config = SessionConfig::CreateDefault();
+  session_config.GetMutableSamplerParams() = sampler_params_;
+  session_config.GetMutableStopTokenIds() = stop_token_ids;
+  session_config.SetStartTokenId(2);
+  auto executor = CreateFakeLlmExecutor(
+      // "Hello World!" in the first turn and in a later turn.
+      /*prefill_tokens=*/{{2, 90, 547, 58, 735, 210, 466, 2294},
+                          {90, 547, 58, 735, 210, 466, 2294}},
+      // "How's it going?"
+      /*decode_tokens=*/{{224}, {24}, {8}, {66}, {246}, {18}, {2295}, {2294}});
+  ASSERT_OK_AND_ASSIGN(auto* executor_settings,
+                       executor->GetMutableExecutorSettings());
+  executor_settings->SetMaxNumTokens(20);
+  ASSERT_OK_AND_ASSIGN(
+      std::shared_ptr<ExecutionManager> execution_manager,
+      ThreadedExecutionManager::Create(tokenizer_.get(), model_resources_.get(),
+                                       std::move(executor),
+                                       /*vision_executor_settings=*/nullptr,
+                                       /*audio_executor_settings=*/nullptr,
+                                       /*litert_env=*/nullptr));
+  ASSERT_OK_AND_ASSIGN(
+      auto session,
+      SessionAdvanced::Create(execution_manager, tokenizer_.get(),
+                              session_config, /*benchmark_info=*/std::nullopt));
+
+  std::vector<InputData> inputs;
+  inputs.emplace_back(InputText("Hello World!"));
+  EXPECT_OK(session->RunPrefill(inputs));
+  auto decode_config = DecodeConfig::CreateDefault();
+  decode_config.SetMaxOutputTokens(2);
+  EXPECT_OK(session->RunDecode(decode_config));
+  ASSERT_OK_AND_ASSIGN(int step, session->GetCurrentStep());
+  EXPECT_EQ(step, 10);
+
+  // The input does not fit in the space left in the context window.
+  std::vector<InputData> long_inputs;
+  long_inputs.emplace_back(InputText("Hello World! Hello World!"));
+  EXPECT_THAT(session->RunPrefill(long_inputs),
+              StatusIs(absl::StatusCode::kResourceExhausted));
+  ASSERT_OK_AND_ASSIGN(step, session->GetCurrentStep());
+  EXPECT_EQ(step, 10);
+
+  // The rejected prefill must not keep the next prefill and decode from
+  // running.
+  EXPECT_OK(session->RunPrefill(inputs));
+  ASSERT_OK_AND_ASSIGN(step, session->GetCurrentStep());
+  EXPECT_EQ(step, 17);
+  ASSERT_OK_AND_ASSIGN(auto responses, session->RunDecode(decode_config));
+  ASSERT_EQ(responses.GetTokenIds().size(), 1);
+  EXPECT_THAT(responses.GetTokenIds()[0], testing::ElementsAre(8, 66));
+}
+
 TEST_F(SessionAdvancedTest, RunPrefillAndDecodeAsyncWithInternalSampler) {
   const std::vector<std::vector<int>> stop_token_ids = {{2294}};
   SessionConfig session_config = SessionConfig::CreateDefault();
