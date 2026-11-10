@@ -240,7 +240,18 @@
             + ", tools \(spec.kind == .tooled ? tools.count : 0)")
         conversation = try await engine.createConversation(with: spec.config)
       }
-      defer { cache.keep(conversation, for: spec.key, consumed: plan.triggerIndex) }
+      // A turn that ran to its end leaves its conversation for the next turn. A cancelled turn
+      // cancels its conversation's generation (`cancellingGeneration`), and a cancelled
+      // conversation is not to be used again (c/engine.h); a turn that threw leaves it in no known
+      // state. Either is retired: the next turn builds a fresh conversation from the transcript.
+      var finished = false
+      defer {
+        if finished {
+          cache.keep(conversation, for: spec.key, consumed: plan.triggerIndex)
+        } else {
+          cache.retire(conversation)
+        }
+      }
 
       if guided {
         // Buffered: FM parses the structure out of the text it is handed, and
@@ -248,14 +259,17 @@
         var full = ""
         let sent = Date()
         var firstToken: Date?
-        for try await chunk in conversation.sendMessageStream(
-          plan.prompt, responseFormat: responseFormat)
-        {
-          let piece = chunk.toString
-          if firstToken == nil, !piece.isEmpty { firstToken = Date() }
-          full += piece
-          LiteRTFMTrace.emit(piece)
+        let stream = conversation.sendMessageStream(plan.prompt, responseFormat: responseFormat)
+        try await Self.cancellingGeneration(of: conversation) {
+          for try await chunk in stream {
+            let piece = chunk.toString
+            if firstToken == nil, !piece.isEmpty { firstToken = Date() }
+            full += piece
+            LiteRTFMTrace.emit(piece)
+          }
         }
+        // A cancelled turn's text is cut short; it is not handed to FM.
+        try Task.checkCancellation()
         let done = Date()
         LiteRTFMTrace.timing(
           "guided turn: ttft \(String(format: "%.1f", (firstToken ?? done).timeIntervalSince(sent)))s"
@@ -285,14 +299,20 @@
         var parsedCalls: [ToolCall] = []
         let sent = Date()
         var firstToken: Date?
-        for try await chunk in conversation.sendMessageStream(plan.prompt) {
-          let piece = chunk.toString
-          if firstToken == nil, !piece.isEmpty { firstToken = Date() }
-          replyText += piece
-          thought += chunk.channels.values.joined()
-          parsedCalls += chunk.toolCalls
-          LiteRTFMTrace.emit(piece)
+        let stream = conversation.sendMessageStream(plan.prompt)
+        try await Self.cancellingGeneration(of: conversation) {
+          for try await chunk in stream {
+            let piece = chunk.toString
+            if firstToken == nil, !piece.isEmpty { firstToken = Date() }
+            replyText += piece
+            thought += chunk.channels.values.joined()
+            parsedCalls += chunk.toolCalls
+            LiteRTFMTrace.emit(piece)
+          }
         }
+        // A cancelled turn's call is not handed to FM: FM would run the tool for a turn no one
+        // waits for.
+        try Task.checkCancellation()
         let done = Date()
         if !thought.isEmpty { LiteRTFMTrace.emit("\n[think] \(thought)\n") }
         let turn = plan.respondingToTool ? "answer turn" : "call turn"
@@ -335,15 +355,19 @@
         let sent = Date()
         var firstToken: Date?
         var total = 0
-        for try await chunk in conversation.sendMessageStream(plan.prompt) {
-          let delta = chunk.toString
-          if !delta.isEmpty {
-            if firstToken == nil { firstToken = Date() }
-            total += delta.count
-            LiteRTFMTrace.emit(delta)
-            await channel.send(.response(action: .appendText(delta, tokenCount: 1)))
+        let stream = conversation.sendMessageStream(plan.prompt)
+        try await Self.cancellingGeneration(of: conversation) {
+          for try await chunk in stream {
+            let delta = chunk.toString
+            if !delta.isEmpty {
+              if firstToken == nil { firstToken = Date() }
+              total += delta.count
+              LiteRTFMTrace.emit(delta)
+              await channel.send(.response(action: .appendText(delta, tokenCount: 1)))
+            }
           }
         }
+        try Task.checkCancellation()
         let done = Date()
         LiteRTFMTrace.timing(
           "chat turn: ttft \(String(format: "%.1f", (firstToken ?? done).timeIntervalSince(sent)))s"
@@ -352,6 +376,18 @@
         if total == 0 {
           await channel.send(.response(action: .appendText("", tokenCount: 0)))
         }
+      }
+      finished = true
+    }
+
+    /// Runs `body`, which reads a stream of `conversation`. When the task running the turn is
+    /// cancelled, the reader stops, and so does the generation: the engine would otherwise decode
+    /// the rest of the reply for no one, and the next session's first token would wait behind it.
+    private static func cancellingGeneration(
+      of conversation: Conversation, whileReading body: () async throws -> Void
+    ) async throws {
+      try await withTaskCancellationHandler(operation: body) {
+        try? conversation.cancel()
       }
     }
 
@@ -927,6 +963,16 @@
       self.conversation = conversation
       self.key = key
       self.consumed = trigger
+      lock.unlock()
+    }
+
+    /// Holds a conversation that is not to be used again until the next `keep` replaces it. Its
+    /// stream's callback may still be running, and the callback must not drop the conversation's
+    /// last reference: the conversation would be deleted inside it (c/engine.h).
+    func retire(_ conversation: Conversation) {
+      lock.lock()
+      self.conversation = conversation
+      self.key = nil
       lock.unlock()
     }
   }

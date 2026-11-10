@@ -917,7 +917,7 @@ private func streamCallback(
           context.continuation.yield(Message(contents: [], role: .model, toolCalls: toolCalls))
         }
         context.continuation.finish()
-        Unmanaged<Conversation.StreamContext>.fromOpaque(userData).release()
+        releaseStreamContext(userData)
         return
       }
       if context.toolCallCount >= recurringToolCallLimit {
@@ -957,4 +957,16 @@ private func streamCallback(
       Unmanaged<Conversation.StreamContext>.fromOpaque(userData).release()
     }
   }
+}
+
+/// Drops a stream callback's reference to its context, on another thread. The context holds the
+/// conversation, and this can be the last reference to it, for example when the caller released
+/// the conversation while its stream was open. Deleting a conversation waits until its tasks are
+/// done, the task whose callback is running included, so deleting it inside that callback waits
+/// for itself, for up to 10 minutes (`Engine::kDefaultTimeout`), and holds the callback thread
+/// that every conversation of the engine shares. c/engine.h asks callbacks to hand such work to
+/// another thread.
+private func releaseStreamContext(_ userData: UnsafeMutableRawPointer) {
+  nonisolated(unsafe) let context = Unmanaged<Conversation.StreamContext>.fromOpaque(userData)
+  DispatchQueue.global(qos: .utility).async { context.release() }
 }
