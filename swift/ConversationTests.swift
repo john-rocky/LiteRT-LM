@@ -753,6 +753,57 @@ class ConversationTests: XCTestCase {
     localConversation = nil
   }
 
+  func testStreamHoldingLastConversationReferenceDoesNotBlockNextStream() async throws {
+    // Only the stream holds this conversation, so its last reference falls when the stream ends.
+    let stream = try await self.engine.createConversation().sendMessageStream(Message("Hello"))
+    for try await _ in stream {}
+
+    // The next stream of the engine finishes only if the engine's callback thread is free.
+    let next = try await self.engine.createConversation()
+    let finished = expectation(description: "The next stream finished.")
+    Task.detached {
+      do {
+        for try await _ in next.sendMessageStream(Message("Hello")) {}
+      } catch {
+        XCTFail("The next stream threw: \(error)")
+      }
+      finished.fulfill()
+    }
+    await fulfillment(of: [finished], timeout: 60)
+  }
+
+  // In the next test the stream holds the conversation's last reference when it ends. That
+  // reference must not be dropped inside the stream's callback: deleting the conversation there
+  // waits for the callback's own task, holds the callback thread that every conversation of the
+  // engine shares for up to 10 minutes, and the next conversation gets no reply until then.
+
+  func testStreamWhoseReaderIsCancelledDoesNotHoldTheEngine() async throws {
+    var conversation: Conversation? = try await self.engine.createConversation(
+      with: ConversationConfig())
+    let stream = conversation!.sendMessageStream(Message("How are you"))
+    conversation = nil
+
+    let reader = Task {
+      for try await _ in stream {
+        withUnsafeCurrentTask { $0?.cancel() }
+      }
+    }
+    _ = await reader.result
+
+    try await assertNextConversationAnswers()
+  }
+
+  /// A new conversation of the engine answers within a minute.
+  private func assertNextConversationAnswers() async throws {
+    let next = try await self.engine.createConversation(with: ConversationConfig())
+    let answered = expectation(description: "the next conversation answers")
+    Task {
+      let response = try await next.sendMessage(Message("How are you"))
+      if !response.contents.isEmpty { answered.fulfill() }
+    }
+    await fulfillment(of: [answered], timeout: 60)
+  }
+
   func testCloneConversationSucceeds() async throws {
     let template = """
       {{ bos_token }}{% for message in messages %}{{ message.content[0].text }}{% endfor %}
