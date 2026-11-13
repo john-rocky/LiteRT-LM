@@ -24,6 +24,7 @@ For the formal JSON Schema specification of all input variables, see
     -   [Built-in Filters and Functions](#built-in-filters-and-functions)
     -   [Handling Tool Calls](#handling-tool-calls)
     -   [Handling Thinking Mode](#handling-thinking-mode)
+    -   [Rendering Conversation History](#rendering-conversation-history)
 -   [Examples](#examples)
 -   [Testing and Validation](#testing-and-validation)
 
@@ -258,6 +259,38 @@ filter:
 </think>
 {%- endif -%}
 ```
+
+### Rendering Conversation History
+
+Render each message the same way no matter which messages come after it.
+
+For each new message, LiteRT-LM renders the template twice: first with the
+conversation so far and `add_generation_prompt` set to false, then with the new
+message added and `add_generation_prompt` set to true. It prefills only the text
+that the second render adds, so the second render must start with the first. If
+it does not, the message fails with one of these errors:
+
+```
+The new rendered template string does not start with the previous rendered template string.
+The new rendered string does not start with the previous rendered string.
+```
+
+The error message also contains both renders, so you can see where they differ.
+
+Two template patterns break this rule:
+
+-   Rendering a message differently once a newer message follows it. For
+    example, the Hugging Face chat templates of Qwen3 and Qwen3.5 render the
+    thinking block only in assistant turns after the last user message, so the
+    latest assistant turn loses its thinking block when the next user message
+    is appended.
+-   Adding text after the last message when `add_generation_prompt` is false,
+    for example in the `{% else %}` branch of `{% if add_generation_prompt %}`.
+
+For a reasoning model, render the thinking block in every assistant turn or in
+none. The canonical [`qwen3/chat_template.jinja`](./qwen3/chat_template.jinja)
+and [`qwen3_5/chat_template.jinja`](./qwen3_5/chat_template.jinja) leave it out
+of every assistant turn.
 
 ## Examples
 
