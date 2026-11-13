@@ -708,17 +708,17 @@ LiteRtLmStatusCode litert_lm_engine_settings_create_from_raw_file_descriptor(
     return litert::lm::c::ReturnError(absl::StatusCode::kInvalidArgument,
                                       "Invalid file descriptor.");
   }
-  LITERT_LM_C_ASSIGN_OR_RETURN(
-      ModelAssets model_assets,
-      ModelAssets::Create(
 #if defined(_WIN32)
-          std::make_shared<litert::lm::ScopedFile>(litert::lm::ScopedFile(
-              reinterpret_cast<litert::lm::ScopedFile::PlatformFile>(
-                  _get_osfhandle(fd))))));
+  std::shared_ptr<litert::lm::ScopedFile> model_file =
+      std::make_shared<litert::lm::ScopedFile>(litert::lm::ScopedFile(
+          reinterpret_cast<litert::lm::ScopedFile::PlatformFile>(
+              _get_osfhandle(fd))));
 #else
-          std::make_shared<litert::lm::ScopedFile>(
-              litert::lm::ScopedFile(fd))));
+  std::shared_ptr<litert::lm::ScopedFile> model_file =
+      std::make_shared<litert::lm::ScopedFile>(litert::lm::ScopedFile(fd));
 #endif
+  LITERT_LM_C_ASSIGN_OR_RETURN(ModelAssets model_assets,
+                               ModelAssets::Create(std::move(model_file)));
   ABSL_VLOG(1) << "LiteRT-LM successfully created EngineSettings directly "
                   "from raw File Descriptor: "
                << fd;
