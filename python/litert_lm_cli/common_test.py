@@ -10,6 +10,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import http.client
+import io
+import pathlib
+from unittest import mock
+import urllib.error
+
 from absl.testing import absltest
 from absl.testing import parameterized
 import click
@@ -255,6 +261,43 @@ class CommonInferenceOptionsTest(parameterized.TestCase):
     result = runner.invoke(dummy_cmd, ['--help'])
     self.assertEqual(result.exit_code, 0)
     self.assertNotIn('--enable-ynnpack', result.output)
+
+
+class StreamDownloadTest(absltest.TestCase):
+
+  def _response(self, body):
+    response = mock.create_autospec(
+        http.client.HTTPResponse, spec_set=True, instance=True
+    )
+    response.read.side_effect = io.BytesIO(body).read
+    return response
+
+  def test_stream_download_writes_body(self):
+    download_dir = pathlib.Path(self.create_tempdir().full_path)
+
+    path = common.stream_download(
+        self._response(b'model data'),
+        download_dir=download_dir,
+        length=10,
+        format_progress=str,
+    )
+
+    self.assertEqual(path.read_bytes(), b'model data')
+
+  def test_stream_download_short_body_raises_and_removes_file(self):
+    download_dir = pathlib.Path(self.create_tempdir().full_path)
+
+    with self.assertRaisesRegex(
+        urllib.error.URLError, 'got only 5 out of 10 bytes'
+    ):
+      common.stream_download(
+          self._response(b'model'),
+          download_dir=download_dir,
+          length=10,
+          format_progress=str,
+      )
+
+    self.assertEmpty(list(download_dir.iterdir()))
 
 
 if __name__ == '__main__':

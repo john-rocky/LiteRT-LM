@@ -99,6 +99,48 @@ class HuggingFaceDownloadTest(absltest.TestCase):
         f"https://huggingface.co/{repo_id}/resolve/main/{filename}",
     )
 
+  @mock.patch.object(urllib.request, "urlopen", autospec=True)
+  def test_download_from_huggingface_incomplete_is_not_cached(
+      self, mock_urlopen
+  ):
+    repo_id = "test-owner/test-model"
+    filename = "model.litertlm"
+    expected_content = b"model data"
+
+    def make_response(body):
+      response = mock.create_autospec(
+          http.client.HTTPResponse, spec_set=True, instance=True
+      )
+      response.getheader.return_value = str(len(expected_content))
+      response.read.side_effect = io.BytesIO(body).read
+      return response
+
+    # The first connection closes after 5 of the 10 bytes; the second one
+    # sends the whole file.
+    mock_urlopen.return_value.__enter__.side_effect = [
+        make_response(expected_content[:5]),
+        make_response(expected_content),
+    ]
+    base_dir = pathlib.Path(self.temp_dir.full_path)
+    expected_path = base_dir / "cache" / "huggingface" / repo_id / filename
+
+    with self.assertRaises(click.ClickException) as ctx:
+      huggingface_download.download_from_huggingface(
+          repo_id=repo_id, filename=filename, token=None
+      )
+
+    self.assertIn("got only 5 out of 10 bytes", str(ctx.exception))
+    self.assertFalse(expected_path.exists())
+    self.assertEmpty(list((base_dir / "downloading").iterdir()))
+
+    result = huggingface_download.download_from_huggingface(
+        repo_id=repo_id, filename=filename, token=None
+    )
+
+    self.assertEqual(result, str(expected_path))
+    self.assertEqual(expected_path.read_bytes(), expected_content)
+    self.assertEqual(mock_urlopen.call_count, 2)
+
   @mock.patch.object(click, "echo", autospec=True)
   @mock.patch.object(urllib.request, "urlopen", autospec=True)
   def test_download_from_huggingface_http_error_gated(

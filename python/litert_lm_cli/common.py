@@ -19,6 +19,7 @@ import http.client
 import pathlib
 import tempfile
 import textwrap
+import urllib.error
 
 import click
 
@@ -319,6 +320,10 @@ def stream_download(
 
   Returns:
     The path to the temporary file where the response body was written.
+
+  Raises:
+    urllib.error.URLError: If `length` is known and the response body ends
+      before `length` bytes.
   """
   download_dir.mkdir(parents=True, exist_ok=True)
   tmp_file = tempfile.NamedTemporaryFile(dir=download_dir, delete=False)
@@ -339,6 +344,12 @@ def stream_download(
           tmp_file.write(chunk)
           current_pos += len(chunk)
           bar.update(len(chunk), current_item=format_progress(current_pos))
+    # http.client's read(amt) returns b"" instead of raising IncompleteRead
+    # when the connection closes before the whole body has arrived.
+    if length is not None and current_pos < length:
+      raise urllib.error.URLError(
+          f"retrieval incomplete: got only {current_pos} out of {length} bytes"
+      )
   except Exception:
     try:
       tmp_file_path.unlink(missing_ok=True)
