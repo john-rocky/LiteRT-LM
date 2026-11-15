@@ -601,6 +601,7 @@ cc_library(
         "//conditions:default": ["@platforms//:incompatible"],
     }),
     deps = OPENCL_SAMPLER_COMMON_DEPS + [
+        "@com_google_absl//absl/cleanup",
         "@com_google_absl//absl/status:status_macros",
         "@litert//litert/cc:litert_any",
         "@litert//litert/cc:litert_element_type",
