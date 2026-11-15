@@ -209,6 +209,9 @@ class TopKOpenClSampler : public TopKGpuSampler {
   // The event for the sampling operation. We should wait for this event before
   // downloading the sampled ids.
   ml_drift::cl::CLEvent sample_event_;
+  // Host copy of the sampled ids, when they are read on env_->queue()
+  // (Adreno, when HandlesInput() is true).
+  std::vector<int32_t> sampled_ids_;
 
   // Holds the constraint mask tensor.
   std::unique_ptr<ml_drift::cl::Tensor> constraint_mask_;
