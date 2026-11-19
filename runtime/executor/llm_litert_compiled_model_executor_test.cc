@@ -94,6 +94,15 @@ constexpr char kTestStaticModelPath[] =
 constexpr char kTestDynamicModelPath[] =
     "litert_lm/runtime/testdata/test_lm_dynamic.litertlm";
 
+// A small 1-layer random-weights LLM with dynamic sequence and context length
+// dimensions, packed twice by `litert-lm pack`: with its weights in the model
+// graph, and with them in a TFLiteWeights section
+// (--weights-in-model-graph=false).
+constexpr char kTestDynamicSmallModelPath[] =
+    "litert_lm/runtime/testdata/test_lm_dynamic_small.litertlm";
+constexpr char kTestDynamicSmallTfliteWeightsModelPath[] =
+    "litert_lm/runtime/testdata/test_lm_dynamic_small_tflite_weights.litertlm";
+
 constexpr char kDummyEmbedderModelPath[] =
     "litert_lm/runtime/testdata/dummy_embedder.tflite";
 
@@ -2627,6 +2636,32 @@ TEST(LlmLiteRtCompiledModelExecutorDynamicTest,
 
   ASSERT_OK(executor->Prefill(MakeTextInputs({10, 11})));
   EXPECT_EQ(captured_prefill_first_token, 9);
+}
+
+TEST(LlmLiteRtCompiledModelExecutorDynamicTest,
+     DecodeWithExternalWeightsMatchesWeightsInGraph) {
+  LITERT_ASSERT_OK_AND_ASSIGN(
+      auto env, Environment::Create(std::vector<Environment::Option>()));
+  const absl::string_view model_paths[] = {
+      kTestDynamicSmallModelPath, kTestDynamicSmallTfliteWeightsModelPath};
+  std::vector<int> decoded_tokens[2];
+  for (int m = 0; m < 2; ++m) {
+    std::unique_ptr<ModelResources> model_resources;
+    std::unique_ptr<LlmLiteRtCompiledModelExecutorDynamic> executor;
+    {
+      ASSERT_OK_AND_ASSIGN(auto p, CreateDynamicExecutor(env, model_paths[m]));
+      std::tie(model_resources, executor) = std::move(p);
+    }
+    ASSERT_OK(executor->Prefill(MakeTextInputs({1, 2, 3})));
+
+    for (int i = 0; i < 16; ++i) {
+      ASSERT_OK_AND_ASSIGN(auto output_tokens, executor->Decode());
+      ASSERT_EQ(output_tokens.size(), 1);
+      ASSERT_EQ(output_tokens[0].size(), 1);
+      decoded_tokens[m].push_back(output_tokens[0][0]);
+    }
+  }
+  EXPECT_EQ(decoded_tokens[0], decoded_tokens[1]);
 }
 
 }  // namespace

@@ -2996,6 +2996,10 @@ LlmLiteRtCompiledModelExecutorDynamic::Create(
                                /*signatures=*/std::nullopt,
                                /*cache_suffix=*/std::nullopt, &resources));
 
+  ABSL_RETURN_IF_ERROR(SetExternalWeightOptions(
+      resources, proto::LlmMetadata::TF_LITE_PREFILL_DECODE,
+      compilation_options));
+
   LITERT_ASSIGN_OR_RETURN(
       auto compiled_model,
       CompiledModel::Create(lrt_env, litert_model->Get(), compilation_options));
