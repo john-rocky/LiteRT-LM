@@ -558,6 +558,9 @@ class Conversation {
   //   `executor_stats` of the end-of-turn message (see `end_of_turn.h`). The
   //   history keeps the message without them. When appending a message
   //   without a response, the end-of-turn message itself.
+  // - RESOURCE_EXHAUSTED if the input of the message does not fit in the space
+  //   left in the context window; the message is then removed from the history
+  //   and the conversation can still be used for a message that fits.
   absl::StatusOr<Message> SendMessage(
       const Message& message, OptionalArgs optional_args = OptionalArgs());
 
