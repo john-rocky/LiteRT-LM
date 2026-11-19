@@ -479,6 +479,26 @@ absl::Status LitertState::Clear() {
   return absl::OkStatus();
 }
 
+absl::Status LitertState::ClearForNewSequence() {
+  // Zero out the linear attention state (recurrent and convolution), which is a
+  // running summary of every token processed so far, and the sliding window KV
+  // cache. Keep the rest of the KV cache, whose entries past the current step
+  // are masked by position.
+  for (auto& [_, state_buffer] : bank_1_state_buffers_) {
+    if (IsLocalOrRecurrentStateBuffer(state_buffer.type)) {
+      LITERT_RETURN_IF_ERROR(state_buffer.buffer.Clear());
+    }
+  }
+  if (bank_2_state_buffers_.has_value()) {
+    for (auto& [_, state_buffer] : *bank_2_state_buffers_) {
+      if (IsLocalOrRecurrentStateBuffer(state_buffer.type)) {
+        LITERT_RETURN_IF_ERROR(state_buffer.buffer.Clear());
+      }
+    }
+  }
+  return absl::OkStatus();
+}
+
 absl::Status LitertState::Resize(CompiledModel& compiled_model,
                                  absl::string_view signature_name,
                                  int num_entries) {
