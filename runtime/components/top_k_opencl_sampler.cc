@@ -17,6 +17,7 @@
 #include <any>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <memory>
 #include <optional>
 #include <random>
@@ -25,6 +26,7 @@
 #include <vector>
 
 #include "absl/base/nullability.h"  // from @com_google_absl
+#include "absl/cleanup/cleanup.h"  // from @com_google_absl
 #include "absl/log/absl_log.h"  // from @com_google_absl
 #include "absl/memory/memory.h"  // from @com_google_absl
 #include "absl/status/status.h"  // from @com_google_absl
@@ -35,6 +37,7 @@
 #include "ml_drift/cl/cl_command_queue.h"  // from @ml_drift
 #include "ml_drift/cl/cl_context.h"  // from @ml_drift
 #include "ml_drift/cl/cl_device.h"  // from @ml_drift
+#include "ml_drift/cl/cl_event.h"  // from @ml_drift
 #include "ml_drift/cl/cl_operation.h"  // from @ml_drift
 #include "ml_drift/cl/environment.h"  // from @ml_drift
 #include "ml_drift/cl/inference_context.h"  // from @ml_drift
@@ -418,6 +421,17 @@ absl::Status TopKOpenClSampler::SampleToIdAndScoreBuffer(
   ABSL_ASSIGN_OR_RETURN(
       const std::vector<float> float_params,
       CreateFloatParams(sampler_params_, uniforms, params_f32_->Channels()));
+  // The sampled ids are copied into the locked ids_tensor below, so check its
+  // size before any GPU work too.
+  const size_t ids_size =
+      config_.sequence_size * config_.batch_size * sizeof(int32_t);
+  LITERT_ASSIGN_OR_RETURN(const size_t ids_tensor_size,
+                          ids_tensor.PackedSize());
+  if (ids_tensor_size < ids_size) {
+    return absl::InvalidArgumentError(
+        absl::StrCat("ids_tensor has ", ids_tensor_size,
+                     " bytes, but the sampled ids need ", ids_size, " bytes."));
+  }
 
   if (logits_tensor.HasEvent()) {
     LITERT_ASSIGN_OR_RETURN(auto event, logits_tensor.GetEvent());
@@ -446,6 +460,36 @@ absl::Status TopKOpenClSampler::SampleToIdAndScoreBuffer(
 
   ABSL_RETURN_IF_ERROR(sampling_->AddToQueue(env_->queue(), &sample_event_));
 
+  // On Adreno, when the next decode step is enqueued below, read the sampled
+  // ids on env_->queue() right behind the sampling kernels. A read on
+  // reading_queue_ issued after the next step is enqueued completes only after
+  // the next step's kernels have run, so the next sampling is enqueued one
+  // decode step late and the GPU idles. Other GPUs keep the read on
+  // reading_queue_: on PowerVR, the same read on env_->queue() made decode
+  // slower with v0.19.0 and a GPU-composite export, though not on main.
+  ml_drift::cl::CLEvent ids_read_event;
+  if (input_handling_ != nullptr && run_inference_func_ != nullptr &&
+      env_->device().GetInfo().IsAdreno()) {
+    sampled_ids_.resize(config_.sequence_size * config_.batch_size);
+    cl_event event = nullptr;
+    const cl_int error_code = ml_drift::cl::clEnqueueReadBuffer(
+        env_->queue()->queue(), tokens_ids_->GetMemoryPtr(), CL_FALSE,
+        /*offset=*/0, /*size=*/sampled_ids_.size() * sizeof(int32_t),
+        sampled_ids_.data(), /*num_events_in_wait_list=*/0, nullptr, &event);
+    if (error_code != CL_SUCCESS) {
+      return absl::UnknownError(absl::StrCat("Failed to clEnqueueReadBuffer - ",
+                                             CLErrorCodeToString(error_code)));
+    }
+    ids_read_event = ml_drift::cl::CLEvent(event);
+    // Submit the sampling kernels and the read ahead of the next step.
+    ml_drift::cl::clFlush(env_->queue()->queue());
+  }
+  // The read writes into sampled_ids_, so every return before the wait below
+  // waits for it first.
+  absl::Cleanup wait_for_ids_read = [&ids_read_event] {
+    if (ids_read_event.is_valid()) ids_read_event.Wait();
+  };
+
   if (input_handling_ != nullptr) {
     ABSL_RETURN_IF_ERROR(input_handling_->AddToQueue(env_->queue()));
     if (run_inference_func_ != nullptr) {
@@ -462,6 +506,18 @@ absl::Status TopKOpenClSampler::SampleToIdAndScoreBuffer(
                           TensorBufferScopedLock::Create(
                               ids_tensor, TensorBuffer::LockMode::kWrite));
   auto* ids_data = lock_and_addr.second;
+  if (ids_read_event.is_valid()) {
+    const cl_event read_event = ids_read_event.event();
+    const cl_int error_code = ml_drift::cl::clWaitForEvents(1, &read_event);
+    std::move(wait_for_ids_read).Cancel();
+    if (error_code != CL_SUCCESS) {
+      return absl::UnknownError(absl::StrCat("Failed to clWaitForEvents - ",
+                                             CLErrorCodeToString(error_code)));
+    }
+    std::memcpy(ids_data, sampled_ids_.data(),
+                sampled_ids_.size() * sizeof(int32_t));
+    return absl::OkStatus();
+  }
   ABSL_RETURN_IF_ERROR(DownloadSampledIds(ids_data));
   return absl::OkStatus();
 }

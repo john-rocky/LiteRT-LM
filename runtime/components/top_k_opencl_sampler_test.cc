@@ -231,6 +231,15 @@ absl::StatusOr<std::vector<int>> Sample(
   return ids;
 }
 
+// Creates an ids tensor of 2 bytes, too small for one sampled id.
+Expected<TensorBuffer> CreateTooSmallIdsTensor(const Environment& litert_env) {
+  return litert::TensorBuffer::CreateManaged(
+      litert_env, litert::TensorBufferType::kHostMemory,
+      litert::RankedTensorType(litert::ElementType::Int16,
+                               litert::Layout(litert::Dimensions({1}))),
+      /*buffer_size=*/sizeof(int16_t));
+}
+
 TEST(TopKOpenClSamplerTest, SamplingWorksAsExpected) {
   ASSERT_OK_AND_ASSIGN(auto ret, CreateLiteRTResources(kTestLmTaskPath));
   auto [litert_model, litert_env, compiled_model] = std::move(ret);
@@ -537,6 +546,42 @@ TEST(TopKOpenClSamplerTest, RejectsInvalidUniforms) {
               absl_testing::StatusIs(absl::StatusCode::kInvalidArgument));
 }
 
+TEST(TopKOpenClSamplerTest, RejectsTooSmallIdsTensor) {
+  ASSERT_OK_AND_ASSIGN(auto ret, CreateLiteRTResources());
+  auto [litert_model, litert_env, compiled_model] = std::move(ret);
+
+  LITERT_ASSERT_OK_AND_ASSIGN(
+      TensorBuffer logits_tensor,
+      compiled_model.CreateOutputBuffer("decode", "logits"));
+  LITERT_ASSERT_OK_AND_ASSIGN(auto tensor_type, logits_tensor.TensorType());
+  const int vocab_size = tensor_type.Layout().Dimensions()[2];
+  proto::SamplerParameters sampler_params;
+  sampler_params.set_k(1);
+  sampler_params.set_p(0.5);
+  sampler_params.set_temperature(1.0);
+  ASSERT_OK_AND_ASSIGN(
+      std::unique_ptr<TopKOpenClSampler> sampler,
+      TopKOpenClSampler::Create(litert_env, /*batch_size=*/1,
+                                /*sequence_size=*/1, vocab_size,
+                                ActivationDataType::FLOAT32, sampler_params));
+
+  LITERT_ASSERT_OK_AND_ASSIGN(TensorBuffer too_small_ids_tensor,
+                              CreateTooSmallIdsTensor(litert_env));
+  const std::vector<float> uniforms = {0.0f};
+  EXPECT_THAT(
+      sampler->SampleToIdAndScoreBuffer(logits_tensor, too_small_ids_tensor,
+                                        /*scores_tensor=*/nullptr, uniforms),
+      absl_testing::StatusIs(absl::StatusCode::kInvalidArgument,
+                             ::testing::HasSubstr("has 2 bytes")));
+
+  // An ids tensor that holds the id works as before.
+  int correct_index = 1, incorrect_index = 0;
+  ASSERT_OK_AND_ASSIGN(auto ids, Sample(&litert_env, logits_tensor, *sampler,
+                                        {correct_index}, {incorrect_index}));
+  ASSERT_EQ(ids.size(), 1);
+  EXPECT_EQ(ids[0], correct_index);
+}
+
 TEST(TopKOpenClSamplerTest, SamplingWorksAsExpectedWithFloat16) {
   ASSERT_OK_AND_ASSIGN(auto ret, CreateLiteRTResources(kTestLmTaskPath));
   auto [litert_model, litert_env, compiled_model] = std::move(ret);
@@ -704,9 +749,9 @@ TEST(TopKOpenClSamplerTest, HandlesInputAfterSampling) {
   bool inference_called = false;
   ASSERT_OK_AND_ASSIGN(
       auto sampler,
-      TopKOpenClSampler::Create(
-          litert_env, /*batch_size=*/1, /*sequence_size=*/1, vocab_size,
-          /*activation_data_type=*/std::nullopt, sampler_params));
+      TopKOpenClSampler::Create(litert_env, /*batch_size=*/1,
+                                /*sequence_size=*/1, vocab_size,
+                                ActivationDataType::FLOAT32, sampler_params));
 
   ASSERT_OK(sampler->SetInferenceFuncAndInputTensors(
       MarkBooleanTrue, &inference_called, &tokens_tensor,
@@ -741,6 +786,18 @@ TEST(TopKOpenClSamplerTest, HandlesInputAfterSampling) {
       static_cast<float*>(prev_mask_lock_and_addr.second)[i] = -1.0f;
     }
   }
+
+  // An ids tensor too small for the id fails the call before any GPU work, so
+  // the next decode step does not run.
+  LITERT_ASSERT_OK_AND_ASSIGN(TensorBuffer too_small_ids_tensor,
+                              CreateTooSmallIdsTensor(litert_env));
+  const std::vector<float> uniforms = {0.0f};
+  EXPECT_THAT(
+      sampler->SampleToIdAndScoreBuffer(logits_tensor, too_small_ids_tensor,
+                                        /*scores_tensor=*/nullptr, uniforms),
+      absl_testing::StatusIs(absl::StatusCode::kInvalidArgument,
+                             ::testing::HasSubstr("has 2 bytes")));
+  EXPECT_FALSE(inference_called);
 
   int correct_index = 1, incorrect_index = 0;
   ASSERT_OK_AND_ASSIGN(auto ids, Sample(&litert_env, logits_tensor, *sampler,

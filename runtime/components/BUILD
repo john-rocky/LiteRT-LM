@@ -573,6 +573,7 @@ OPENCL_SAMPLER_COMMON_DEPS = [
     ":sampler_params_util",
     ":top_k_gpu_sampler",
     "@com_google_absl//absl/base:nullability",
+    "@com_google_absl//absl/cleanup",
     "@com_google_absl//absl/log:absl_log",
     "@com_google_absl//absl/memory",
     "@com_google_absl//absl/status",
