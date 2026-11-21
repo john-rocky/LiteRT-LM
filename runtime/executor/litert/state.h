@@ -93,6 +93,8 @@ class LitertState : public StateInterface {
 
   absl::Status Clear() override;
 
+  absl::Status ClearForNewSequence() override;
+
   // Returns true if all state buffers are backed by host memory.
   bool IsHostMemory() const;
 

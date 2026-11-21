@@ -16,7 +16,9 @@
 #define THIRD_PARTY_ODML_LITERT_LM_FRAMEWORK_RESOURCE_MANAGEMENT_CONTEXT_HANDLER_CONTEXT_HANDLER_H_
 
 #include <algorithm>
+#include <cstdint>
 #include <memory>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -46,7 +48,8 @@ class ContextHandler {
       std::shared_ptr<SharedProcessedContext> shared_processed_context,
       std::unique_ptr<RuntimeConfig> runtime_config,
       std::unique_ptr<RuntimeState> runtime_state,
-      std::unique_ptr<AudioContext> audio_context = nullptr);
+      std::unique_ptr<AudioContext> audio_context = nullptr,
+      std::optional<uint32_t> lora_id = std::nullopt);
 
   ~ContextHandler();
 
@@ -60,6 +63,11 @@ class ContextHandler {
   std::shared_ptr<SharedProcessedContext> shared_processed_context() const {
     return shared_processed_context_;
   }
+
+  // Returns the LoRA id that the handler was created with (from its processed
+  // context, or from the original for a clone). The handler keeps it because
+  // the processed context may be loaded in the executor.
+  std::optional<uint32_t> lora_id() const { return lora_id_; }
 
   // Returns true if the runtime config is set.
   bool HasRuntimeConfig() const { return runtime_config_ != nullptr; }
@@ -132,7 +140,8 @@ class ContextHandler {
       std::shared_ptr<SharedProcessedContext> shared_processed_context,
       std::unique_ptr<RuntimeConfig> runtime_config,
       std::unique_ptr<RuntimeState> runtime_state,
-      std::unique_ptr<AudioContext> audio_context);
+      std::unique_ptr<AudioContext> audio_context,
+      std::optional<uint32_t> lora_id);
 
   // The shared processed context.
   std::shared_ptr<SharedProcessedContext> shared_processed_context_;
@@ -145,6 +154,9 @@ class ContextHandler {
 
   // The audio context.
   std::unique_ptr<AudioContext> audio_context_;
+
+  // The LoRA id that the handler was created with.
+  std::optional<uint32_t> lora_id_;
 };
 
 // Holds the real ProcessedContext and handlers any operations on it.
@@ -167,6 +179,12 @@ class ContextHandler::SharedProcessedContext {
     absl::MutexLock lock(&handlers_mutex_);
     handlers_.erase(std::remove(handlers_.begin(), handlers_.end(), handler),
                     handlers_.end());
+  }
+
+  // Returns true if more than one handler shares this SharedProcessedContext.
+  bool IsShared() const {
+    absl::MutexLock lock(&handlers_mutex_);
+    return handlers_.size() > 1;
   }
 
   // Returns the number of tokens in the longest handler.

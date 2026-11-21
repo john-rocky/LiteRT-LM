@@ -2181,15 +2181,13 @@ absl::Status LlmLiteRtCompiledModelExecutorBase::Reset() {
   if (sampler_ != nullptr && sampler_->HandlesInput()) {
     ABSL_RETURN_IF_ERROR(SetSamplerInputHandling(/*reset=*/true));
   }
-  // Zero out every state buffer, so that a new sequence does not continue from
-  // the previous one. The KV cache alone could be kept, since its entries past
-  // the current step are masked by position, but a linear attention state is a
-  // running summary of every token processed so far.
+  // Zero out the state buffers that a new sequence must not continue from (see
+  // `StateInterface::ClearForNewSequence()`).
   if (state_ != nullptr) {
-    ABSL_RETURN_IF_ERROR(state_->Clear());
+    ABSL_RETURN_IF_ERROR(state_->ClearForNewSequence());
   }
   if (decode_state_ != nullptr) {
-    ABSL_RETURN_IF_ERROR(decode_state_->Clear());
+    ABSL_RETURN_IF_ERROR(decode_state_->ClearForNewSequence());
   }
   return absl::OkStatus();
 }

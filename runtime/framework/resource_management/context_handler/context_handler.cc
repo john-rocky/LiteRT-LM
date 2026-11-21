@@ -15,7 +15,9 @@
 #include "runtime/framework/resource_management/context_handler/context_handler.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <memory>
+#include <optional>
 #include <utility>
 
 #include "absl/status/status.h"  // from @com_google_absl
@@ -59,6 +61,10 @@ absl::StatusOr<std::unique_ptr<ContextHandler>> ContextHandler::Create(
   RET_CHECK_NE(llm_context, nullptr) << "The llm_context is null.";
   ABSL_ASSIGN_OR_RETURN(auto processed_context,
                         llm_context->RetrieveProcessedContext());
+  std::optional<uint32_t> lora_id;
+  if (processed_context != nullptr) {
+    lora_id = processed_context->lora_id();
+  }
   auto shared_processed_context =
       std::make_shared<SharedProcessedContext>(std::move(processed_context));
   ABSL_ASSIGN_OR_RETURN(auto runtime_config,
@@ -66,7 +72,7 @@ absl::StatusOr<std::unique_ptr<ContextHandler>> ContextHandler::Create(
   ABSL_ASSIGN_OR_RETURN(auto runtime_state,
                         llm_context->RetrieveRuntimeState());
   return Bundle(shared_processed_context, std::move(runtime_config),
-                std::move(runtime_state), std::move(audio_context));
+                std::move(runtime_state), std::move(audio_context), lora_id);
 }
 
 // static
@@ -74,12 +80,14 @@ absl::StatusOr<std::unique_ptr<ContextHandler>> ContextHandler::Bundle(
     std::shared_ptr<SharedProcessedContext> shared_processed_context,
     std::unique_ptr<RuntimeConfig> runtime_config,
     std::unique_ptr<RuntimeState> runtime_state,
-    std::unique_ptr<AudioContext> audio_context) {
+    std::unique_ptr<AudioContext> audio_context,
+    std::optional<uint32_t> lora_id) {
   RET_CHECK_NE(shared_processed_context, nullptr)
       << "The shared_processed_context is null.";
   auto handler = std::unique_ptr<ContextHandler>(
       new ContextHandler(shared_processed_context, std::move(runtime_config),
-                         std::move(runtime_state), std::move(audio_context)));
+                         std::move(runtime_state), std::move(audio_context),
+                         lora_id));
   return handler;
 }
 
@@ -105,11 +113,13 @@ ContextHandler::ContextHandler(
     std::shared_ptr<SharedProcessedContext> shared_processed_context,
     std::unique_ptr<RuntimeConfig> runtime_config,
     std::unique_ptr<RuntimeState> runtime_state,
-    std::unique_ptr<AudioContext> audio_context)
+    std::unique_ptr<AudioContext> audio_context,
+    std::optional<uint32_t> lora_id)
     : shared_processed_context_(shared_processed_context),
       runtime_config_(std::move(runtime_config)),
       runtime_state_(std::move(runtime_state)),
-      audio_context_(std::move(audio_context)) {
+      audio_context_(std::move(audio_context)),
+      lora_id_(lora_id) {
   shared_processed_context_->AddHandler(this);
 }
 
