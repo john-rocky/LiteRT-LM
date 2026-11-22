@@ -71,11 +71,34 @@ fn detect_capabilities(source: &str) -> ffi::ChatTemplateCapabilities {
     }
 }
 
+// Runs `f` and returns a panic inside it as an error, like an error that `f` returns. minijinja can
+// panic on some template text, and a panic must not unwind out of a function that C++ calls through
+// the cxx bridge: the bridge aborts the whole process when one does.
+fn catch_panic<T, E: std::fmt::Display>(
+    f: impl FnOnce() -> Result<T, E> + std::panic::UnwindSafe,
+) -> Result<T, String> {
+    match std::panic::catch_unwind(f) {
+        Ok(result) => result.map_err(|e| e.to_string()),
+        Err(payload) => {
+            let message = if let Some(s) = payload.downcast_ref::<&str>() {
+                s.to_string()
+            } else if let Some(s) = payload.downcast_ref::<String>() {
+                s.clone()
+            } else {
+                "unknown panic".to_string()
+            };
+            Err(format!("Template engine panicked: {message}"))
+        }
+    }
+}
+
 fn new_minijinja_template(source: String) -> Box<MinijinjaTemplate> {
-    let env = Environment::new();
-    let creation_error = match env.template_from_str(&source) {
-        Ok(_) => String::new(),
-        Err(e) => e.to_string(),
+    let creation_error = match catch_panic(|| {
+        let env = Environment::new();
+        env.template_from_str(&source).map(|_| ())
+    }) {
+        Ok(()) => String::new(),
+        Err(e) => e,
     };
 
     let caps = detect_capabilities(&source);
@@ -194,11 +217,9 @@ fn create_env() -> Environment<'static> {
 
 impl MinijinjaTemplate {
     fn apply(&self, inputs_json: String) -> ffi::ApplyResult {
-        match self.apply_impl(inputs_json) {
+        match catch_panic(|| self.apply_impl(inputs_json)) {
             Ok(s) => ffi::ApplyResult { content: s, error: String::new(), is_ok: true },
-            Err(e) => {
-                ffi::ApplyResult { content: String::new(), error: e.to_string(), is_ok: false }
-            }
+            Err(e) => ffi::ApplyResult { content: String::new(), error: e, is_ok: false },
         }
     }
 
@@ -408,5 +429,54 @@ mod tests {
         let res = wrapper.apply(inputs.to_string());
         assert!(res.is_ok);
         assert_eq!(res.content, "  foo  |bar  |  baz|foo12|12foo");
+    }
+
+    // catch_unwind catches nothing in a build with panic=abort.
+    #[cfg(panic = "unwind")]
+    #[test]
+    fn test_catch_panic() {
+        let res: Result<(), String> = catch_panic(|| -> Result<(), String> { panic!("boom") });
+        assert_eq!(res.unwrap_err(), "Template engine panicked: boom");
+
+        let res: Result<(), String> =
+            catch_panic(|| -> Result<(), String> { panic!("index {} is out of bounds", 3) });
+        assert_eq!(res.unwrap_err(), "Template engine panicked: index 3 is out of bounds");
+
+        assert_eq!(catch_panic(|| Err::<(), _>("render error")).unwrap_err(), "render error");
+        assert_eq!(catch_panic(|| Ok::<_, String>(7)).unwrap(), 7);
+    }
+
+    #[cfg(panic = "unwind")]
+    #[test]
+    fn test_apply_returns_error_on_panic() {
+        // minijinja 2.14.0 panics (index out of bounds) when it slices an empty list with a
+        // negative step, as a template that loops over `messages[::-1]` does with no messages.
+        let source = "{% for message in messages[::-1] %}{{ message.role }}{% endfor %}";
+        let wrapper = new_minijinja_template(source.to_string());
+        assert!(wrapper.creation_error.is_empty());
+
+        let inputs = json!({
+            "messages": [],
+            "tools": null,
+            "add_generation_prompt": false,
+            "extra_context": {}
+        });
+        let res = wrapper.apply(inputs.to_string());
+        assert!(!res.is_ok);
+        assert!(res.error.starts_with("Template engine panicked: "));
+
+        // The same template still renders when there are messages.
+        let inputs = json!({
+            "messages": [
+                {"role": "user", "content": "Hi"},
+                {"role": "assistant", "content": "Hello"}
+            ],
+            "tools": null,
+            "add_generation_prompt": false,
+            "extra_context": {}
+        });
+        let res = wrapper.apply(inputs.to_string());
+        assert!(res.is_ok);
+        assert_eq!(res.content, "assistantuser");
     }
 }
