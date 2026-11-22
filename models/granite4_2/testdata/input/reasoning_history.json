@@ -1,0 +1,88 @@
+{
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "get_weather",
+        "description": "Get current weather for a location.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "location": {
+              "type": "string",
+              "description": "City name"
+            }
+          },
+          "required": [
+            "location"
+          ]
+        }
+      }
+    }
+  ],
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "What is the weather in London?"
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "type": "function",
+          "function": {
+            "name": "get_weather",
+            "arguments": {
+              "location": "London"
+            }
+          }
+        }
+      ],
+      "channels": {
+        "thought": "The user wants the weather in London. I will call the tool."
+      },
+      "reasoning_content": "The user wants the weather in London. I will call the tool."
+    },
+    {
+      "role": "tool",
+      "content": [
+        {
+          "type": "tool_response",
+          "name": "get_weather",
+          "response": {
+            "location": "London",
+            "temperature": "18C"
+          }
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "It is 18C in London."
+        }
+      ],
+      "channels": {
+        "thought": "The tool says 18C."
+      },
+      "reasoning_content": "The tool says 18C."
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "Is that warm?"
+        }
+      ]
+    }
+  ],
+  "add_generation_prompt": true
+}
