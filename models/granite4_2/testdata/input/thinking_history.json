@@ -1,0 +1,50 @@
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "Which matters more on a phone: prefill speed or decode speed? Answer briefly."
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "\n\nDecode speed matters more, because it sets how quickly the user sees each word."
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "And for a 2B model?"
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "Summarize our conversation in one sentence."
+        }
+      ]
+    }
+  ],
+  "add_generation_prompt": true
+}
