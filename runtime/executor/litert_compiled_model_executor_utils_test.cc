@@ -2541,6 +2541,38 @@ TEST(LlmLiteRTCompiledModelExecutorUtilsTest,
   }
 }
 
+TEST(LlmLiteRTCompiledModelExecutorUtilsTest,
+     SetCommonGpuOptions_Fp16WithFp32Accum) {
+  DummyExecutorSettings executor_settings;
+  auto expect_precision = [&](ActivationDataType activation_type,
+                              LiteRtDelegatePrecision expected) {
+    SCOPED_TRACE(::testing::Message()
+                 << activation_type << ", fp32 accumulation: "
+                 << executor_settings.IsFp16WithFp32AccumEnabled()
+                 << ", mixed precision: "
+                 << executor_settings.IsMixedPrecisionEnabled());
+    LITERT_ASSERT_OK_AND_ASSIGN(auto gpu_options, litert::GpuOptions::Create());
+    ASSERT_OK(SetCommonGpuOptions(executor_settings, gpu_options,
+                                  activation_type));
+    EXPECT_EQ(GetGpuPrecision(gpu_options), expected);
+  };
+
+  expect_precision(ActivationDataType::FLOAT32, kLiteRtDelegatePrecisionFp32);
+  expect_precision(ActivationDataType::FLOAT16, kLiteRtDelegatePrecisionFp16);
+
+  executor_settings.SetEnableFp16WithFp32Accum(true);
+  expect_precision(ActivationDataType::FLOAT32, kLiteRtDelegatePrecisionFp32);
+  expect_precision(ActivationDataType::FLOAT16,
+                   kLiteRtDelegatePrecisionFp16WithFp32Accum);
+  expect_precision(ActivationDataType::INT16,
+                   kLiteRtDelegatePrecisionFp16WithFp32Accum);
+  expect_precision(ActivationDataType::INT8,
+                   kLiteRtDelegatePrecisionFp16WithFp32Accum);
+
+  executor_settings.SetEnableMixedPrecision(true);
+  expect_precision(ActivationDataType::FLOAT16, kLiteRtDelegatePrecisionFp32);
+}
+
 // A fake ModelResources whose weight-section lookup and backing file can be
 // configured per test. Only the members exercised by GetExternalWeightResources
 // are meaningful; all other lookups return errors.

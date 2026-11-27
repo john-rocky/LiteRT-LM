@@ -416,6 +416,14 @@ class ExecutorSettingsBase {
     enable_mixed_precision_ = enable;
   }
 
+  // Use fp32 accumulation for supported GPU operations running in fp16.
+  bool IsFp16WithFp32AccumEnabled() const {
+    return enable_fp16_with_fp32_accum_;
+  }
+  void SetEnableFp16WithFp32Accum(bool enable) {
+    enable_fp16_with_fp32_accum_ = enable;
+  }
+
   // Should be used by consumers who want to write to a single weight cache
   // file. `suffix` is the model's name (see `GetCacheModelName()`) followed by
   // the backend suffix. Returns, in order of preference:
@@ -566,6 +574,7 @@ class ExecutorSettingsBase {
   // Optional setting to enable mixed precision. If true, it will override
   // activation data type to FP32 which underlying for mix precision.
   bool enable_mixed_precision_ = false;
+  bool enable_fp16_with_fp32_accum_ = false;
 
   // Optional LoRA model assets.
   std::optional<ModelAssets> lora_model_assets_;

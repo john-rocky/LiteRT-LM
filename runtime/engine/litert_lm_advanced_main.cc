@@ -223,6 +223,7 @@ absl::Status MainHelper(int argc, char** argv) {
            "[--benchmark_decode_tokens=<num_decode_tokens>] "
            "[--benchmark_append_chunks=<num_chunks>] "
            "[--async=<true|false>] [--force_f32=<true|false] "
+           "[--gpu_enable_fp16_with_fp32_accum=<true|false>] "
            "[--report_peak_memory_footprint] [--multi_turns=<true|false>] "
            "[--num_cpu_threads=<num_cpu_threads>] "
            "[--enable_ynnpack=<true|false|auto>] "
@@ -308,6 +309,8 @@ absl::Status MainHelper(int argc, char** argv) {
   settings.report_peak_memory_footprint =
       absl::GetFlag(FLAGS_report_peak_memory_footprint);
   settings.force_f32 = absl::GetFlag(FLAGS_force_f32);
+  settings.gpu_enable_fp16_with_fp32_accum =
+      absl::GetFlag(FLAGS_gpu_enable_fp16_with_fp32_accum);
   settings.multi_turns = absl::GetFlag(FLAGS_multi_turns);
   settings.num_cpu_threads = absl::GetFlag(FLAGS_num_cpu_threads);
   settings.enable_ynnpack = absl::GetFlag(FLAGS_enable_ynnpack);

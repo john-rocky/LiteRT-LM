@@ -1149,6 +1149,9 @@ absl::Status SetCommonGpuOptions(
   if (executor_settings.IsMixedPrecisionEnabled() ||
       activation_type == ActivationDataType::FLOAT32) {
     gpu_options.SetPrecision(GpuOptions::Precision::kFp32);
+  } else if (executor_settings.IsFp16WithFp32AccumEnabled()) {
+    LITERT_RETURN_IF_ERROR(
+        gpu_options.SetPrecision(GpuOptions::Precision::kFp16WithFp32Accum));
   } else {
     // For FLOAT16, INT16, and INT8 activation data types, calculation
     // precision of the GPU delegate is set to fp16.

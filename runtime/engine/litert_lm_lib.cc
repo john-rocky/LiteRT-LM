@@ -971,17 +971,19 @@ absl::StatusOr<EngineSettings> CreateEngineSettings(
       configure_caches(*engine_settings.GetMutableAudioExecutorSettings());
     }
   }
-  engine_settings.GetMutableMainExecutorSettings().SetUseIrModel(
-      settings.gpu_use_ir_model);
+  auto configure_gpu_options = [&](ExecutorSettingsBase& executor_settings) {
+    executor_settings.SetUseIrModel(settings.gpu_use_ir_model);
+    executor_settings.SetEnableFp16WithFp32Accum(
+        settings.gpu_enable_fp16_with_fp32_accum);
+  };
+  configure_gpu_options(engine_settings.GetMutableMainExecutorSettings());
   if (settings.vision_backend.has_value() &&
       engine_settings.GetMutableVisionExecutorSettings().has_value()) {
-    engine_settings.GetMutableVisionExecutorSettings()->SetUseIrModel(
-        settings.gpu_use_ir_model);
+    configure_gpu_options(*engine_settings.GetMutableVisionExecutorSettings());
   }
   if (settings.audio_backend.has_value() &&
       engine_settings.GetMutableAudioExecutorSettings().has_value()) {
-    engine_settings.GetMutableAudioExecutorSettings()->SetUseIrModel(
-        settings.gpu_use_ir_model);
+    configure_gpu_options(*engine_settings.GetMutableAudioExecutorSettings());
   }
   if (!settings.litert_dispatch_lib_dir.empty()) {
     engine_settings.GetMutableMainExecutorSettings().SetLitertDispatchLibDir(

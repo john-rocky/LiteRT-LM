@@ -48,6 +48,7 @@ ABSL_DECLARE_FLAG(int, benchmark_append_chunks);
 ABSL_DECLARE_FLAG(bool, async);
 ABSL_DECLARE_FLAG(bool, report_peak_memory_footprint);
 ABSL_DECLARE_FLAG(bool, force_f32);
+ABSL_DECLARE_FLAG(bool, gpu_enable_fp16_with_fp32_accum);
 ABSL_DECLARE_FLAG(bool, multi_turns);
 ABSL_DECLARE_FLAG(int, num_cpu_threads);
 ABSL_DECLARE_FLAG(litert::lm::YnnpackMode, enable_ynnpack);

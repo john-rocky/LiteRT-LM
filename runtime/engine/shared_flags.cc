@@ -92,6 +92,9 @@ ABSL_FLAG(bool, report_peak_memory_footprint, false,
           "the accelerator memory may also be reported.");
 ABSL_FLAG(bool, force_f32, false,
           "Force float 32 precision for the activation data type.");
+ABSL_FLAG(bool, gpu_enable_fp16_with_fp32_accum, false,
+          "Use fp32 accumulation for supported operations when the GPU "
+          "delegate uses fp16 precision.");
 ABSL_FLAG(bool, multi_turns, false,
           "If true, the command line will ask for multi-turns input.");
 ABSL_FLAG(int, num_cpu_threads, 0,

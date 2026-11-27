@@ -194,6 +194,8 @@ struct LiteRtLmSettings {
   bool enable_npu_debug_logging = false;
   bool disable_input_prompt_as_hint = false;
   absl::flat_hash_map<std::string, std::string> custom_backend_options;
+  // Use fp32 accumulation for supported GPU operations running in fp16.
+  bool gpu_enable_fp16_with_fp32_accum = false;
 };
 
 struct LitertLmMetrics {
